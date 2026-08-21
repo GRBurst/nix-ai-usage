@@ -1,0 +1,22 @@
+{
+  "enable": true,
+  "format": "{absent}x",
+  "maxStaleAge": 900,
+  "metrics": {
+    "absent": {
+      "from": {
+        "path": ["nope", "utilization"]
+      },
+      "required": false,
+      "unit": "percent"
+    }
+  },
+  "name": "optional-missing",
+  "refreshInterval": 300,
+  "retryInterval": 60,
+  "rules": [],
+  "source": {
+    "command": "cat /dev/null"
+  },
+  "timeout": 3
+}

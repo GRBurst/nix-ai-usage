@@ -1,0 +1,23 @@
+{
+  "enable": true,
+  "format": "{total}",
+  "maxStaleAge": 900,
+  "metrics": {
+    "total": {
+      "from": {
+        "expression": "[.data[].v] | add"
+      },
+      "required": true,
+      "unit": "dollars"
+    }
+  },
+  "name": "expression-sum",
+  "refreshInterval": 300,
+  "retryInterval": 60,
+  "rules": [],
+  "source": {
+    "command": "cat /dev/null"
+  },
+  "timeout": 3,
+  "tooltipFormat": "total {total}"
+}

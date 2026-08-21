@@ -1,0 +1,55 @@
+{
+  "credential": {
+    "file": {
+      "jqPath": ".claudeAiOauth.accessToken",
+      "path": "/home/pallon/.claude/.credentials.json"
+    }
+  },
+  "enable": true,
+  "format": "{fiveHour}%·{sevenDay}%",
+  "maxStaleAge": 900,
+  "metrics": {
+    "fiveHour": {
+      "from": {
+        "path": ["five_hour", "utilization"]
+      },
+      "required": true,
+      "unit": "percent"
+    },
+    "sevenDay": {
+      "from": {
+        "path": ["seven_day", "utilization"]
+      },
+      "required": true,
+      "unit": "percent"
+    }
+  },
+  "name": "claude",
+  "refreshInterval": 300,
+  "retryInterval": 60,
+  "rules": [
+    {
+      "criticalAt": 90,
+      "metric": "fiveHour",
+      "warnAt": 80
+    },
+    {
+      "criticalAt": 90,
+      "metric": "sevenDay",
+      "warnAt": 80
+    }
+  ],
+  "source": {
+    "http": {
+      "headers": {
+        "Authorization": "Bearer {credential}",
+        "Content-Type": "application/json",
+        "User-Agent": "claude-cli (external, cli)",
+        "anthropic-beta": "oauth-2025-04-20"
+      },
+      "url": "https://api.anthropic.com/api/oauth/usage"
+    }
+  },
+  "timeout": 3,
+  "tooltipFormat": "5h {fiveHour}% · 7d {sevenDay}%"
+}

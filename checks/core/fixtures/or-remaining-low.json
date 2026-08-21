@@ -1,0 +1,9 @@
+{
+  "data": {
+    "label": "sk-or-v1-low",
+    "limit": 20,
+    "limit_remaining": 0.5,
+    "usage": 19.5,
+    "is_free_tier": false
+  }
+}
