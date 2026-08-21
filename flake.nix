@@ -23,7 +23,7 @@
       core = pkgs.callPackage ./checks/core {};
       config = pkgs.callPackage ./checks/config {};
       runtime = pkgs.callPackage ./checks/runtime {};
-      # module = pkgs.callPackage ./checks/module {};
+      module = pkgs.callPackage ./checks/module {};
     });
 
     formatter = forAll (system: (pkgsFor system).alejandra);
