@@ -2,7 +2,7 @@
   "credential": {
     "file": {
       "jqPath": ".claudeAiOauth.accessToken",
-      "path": "/home/pallon/.claude/.credentials.json"
+      "path": "/home/testuser/.claude/.credentials.json"
     }
   },
   "enable": true,

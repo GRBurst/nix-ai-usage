@@ -1,48 +1,47 @@
-# Pure check for the ai-usage config builder (`modules/lib/ai-usage`).
+# Pure check for the ai-usage config builder (`lib/`).
 #
 # This is layer 2 of the ai-usage test pyramid:
 #
-#   1. checks/ai-usage          pure core semantics (jq + fixtures + configs)
-#   2. checks/ai-usage-config   THIS FILE: mkConfig output vs a golden JSON
-#   3. checks/ai-usage-runtime  orchestrator (cache, staleness, throttling)
-#   4. checks/eval-assertions   integration over evaluated hosts
+#   1. checks/core     pure core semantics (jq + fixtures + configs)
+#   2. checks/config   THIS FILE: mkConfig output vs a golden JSON
+#   3. checks/runtime  orchestrator (cache, staleness, throttling)
+#   4. checks/module   the Home Manager module: option shape and assertions
 #
 # `expected.json` is the single place where the shipped provider defaults
 # (endpoints, headers, credential locations, thresholds, templates) are pinned.
-# It replaces the old "must track the module defaults" duplication that used to
-# live in `checks/ai-usage/default.nix`.
+# Downstream consumers must not re-pin them; they may only assert on
+# composition (see `docs/architecture.md` § test layers).
 #
-# Extraction guard: this check must not reference `config`, `my.*`, `osConfig`,
-# `home-manager` or `modules/lib/style`, so that `modules/lib/ai-usage` stays
-# liftable into a standalone flake together with its check.
+# This check is pure: it evaluates only `lib/` and never reads a host
+# configuration, the network, or anything outside this repository.
 {
   pkgs,
   lib,
   ...
 }: let
-  aiLib = import ../../modules/lib/ai-usage {inherit lib;};
+  aiLib = import ../../lib {inherit lib;};
 
   # `homeDirectory` is the only host-derived input to the defaults. The golden
-  # file pins the pallon value because `checks/ai-usage/configs/claude.json`
+  # file pins a neutral `/home/testuser` because `checks/core/configs/claude.json`
   # (layer 1) uses the same path, and the identity rows below compare the two.
   actual = aiLib.mkConfig {
-    providers = aiLib.providerDefaults {homeDirectory = "/home/pallon";};
+    providers = aiLib.providerDefaults {homeDirectory = "/home/testuser";};
   };
 
   golden = builtins.fromJSON (builtins.readFile ./expected.json);
 
   # Layer-1 fixtures must not drift from the shipped defaults.
-  coreClaude = builtins.fromJSON (builtins.readFile ../ai-usage/configs/claude.json);
-  coreOpenrouter = builtins.fromJSON (builtins.readFile ../ai-usage/configs/openrouter.json);
+  coreClaude = builtins.fromJSON (builtins.readFile ../core/configs/claude.json);
+  coreOpenrouter = builtins.fromJSON (builtins.readFile ../core/configs/openrouter.json);
 
   # A disabled provider must disappear from the rendered config entirely, so an
   # entry for a disabled provider is unrepresentable downstream (D-17).
   withDisabled = aiLib.mkConfig {
     providers =
-      (aiLib.providerDefaults {homeDirectory = "/home/pallon";})
+      (aiLib.providerDefaults {homeDirectory = "/home/testuser";})
       // {
         openrouter =
-          (aiLib.providerDefaults {homeDirectory = "/home/pallon";}).openrouter
+          (aiLib.providerDefaults {homeDirectory = "/home/testuser";}).openrouter
           // {enable = false;};
       };
   };
@@ -54,12 +53,12 @@
     {
       name = "core-fixture-claude-matches-defaults";
       condition = actual.providers.claude == coreClaude;
-      message = "checks/ai-usage/configs/claude.json has drifted from providerDefaults.claude";
+      message = "checks/core/configs/claude.json has drifted from providerDefaults.claude";
     }
     {
       name = "core-fixture-openrouter-matches-defaults";
       condition = actual.providers.openrouter == coreOpenrouter;
-      message = "checks/ai-usage/configs/openrouter.json has drifted from providerDefaults.openrouter";
+      message = "checks/core/configs/openrouter.json has drifted from providerDefaults.openrouter";
     }
     {
       name = "version-is-1";
@@ -119,7 +118,7 @@ in
     jq -S . ${goldenFile} > golden.json
     jq -S . ${actualFile} > actual.json
     if ! diff -u golden.json actual.json; then
-      echo 'FAIL: mkConfig output drifted from checks/ai-usage-config/expected.json' >&2
+      echo 'FAIL: mkConfig output drifted from checks/config/expected.json' >&2
       fail=1
     fi
 
