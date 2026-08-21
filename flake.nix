@@ -22,7 +22,7 @@
     in {
       core = pkgs.callPackage ./checks/core {};
       config = pkgs.callPackage ./checks/config {};
-      # runtime = pkgs.callPackage ./checks/runtime {};
+      runtime = pkgs.callPackage ./checks/runtime {};
       # module = pkgs.callPackage ./checks/module {};
     });
 
