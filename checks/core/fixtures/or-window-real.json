@@ -1,0 +1,13 @@
+{
+  "data": {
+    "label": "sk-or-...",
+    "limit": 200,
+    "limit_remaining": 44.01517413299999,
+    "limit_reset": "monthly",
+    "usage": 155.984825867,
+    "usage_daily": 0,
+    "usage_weekly": 11.415461617,
+    "usage_monthly": 155.984825867,
+    "is_free_tier": false
+  }
+}

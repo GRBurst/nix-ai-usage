@@ -1088,3 +1088,69 @@ jq -c '.providers.claude' cfg.json | jq -r -f fmt.jq > checks/core/configs/claud
 positionally; pipe a `jq -c '<filter>'` stage first. **Open follow-up: `fmt.jq` and this
 recipe belong in the repository**, because `AGENTS.md` requires goldens be re-cut
 deliberately rather than hand-edited, and currently offers no way to do it.
+
+### M3 - OpenRouter window-scoped percent, complete
+
+Delivered: `windowUsage` as an `expression` metric on the shipped `openrouter` provider and
+`percent` re-pointed to `percentOf(windowUsage, limit)` (lib), five new `checks/core` rows
+over three new fixtures, both goldens re-cut, and expression pre-evaluation added to the
+core harness. Five checks green, `checks/core` now 41 rows.
+
+| Step | Verified |
+| ---- | -------- |
+| M3.1 RED | core, exit 1, exactly 5 failures: the four new value-pinning rows plus `metrics-order-preserved` |
+| M3.2 GREEN | core+config, exit 1, **8** failures - see the blocker below |
+| M3.3 | both goldens `+10/-1`: `percentOf.of` `usage` -> `windowUsage`, plus the `windowUsage` block |
+| M3.4 | `nix flake check --keep-going`: core, laws, config, runtime, module, formatter, all passed |
+
+**The existing suite could not detect the defect, by construction.** Every `or-*.json`
+fixture was minted with `usage == limit - limit_remaining`, i.e. an account whose lifetime
+spend happens to equal its window spend. So did the real capture: `usage = 155.984825867`
+and `limit - limit_remaining = 155.984825867`, both ratios flooring to 77. The bug was
+invisible to every input anyone had written down, including production. `or-window.json`
+(`limit 200`, `limit_remaining 180`, `usage 500`) is the fixture that sees it:
+
+| | old config | new config |
+| --- | --- | --- |
+| `percent` / `percentage` | 100 | 10 |
+| `severity` | critical | ok |
+
+A 200-dollar monthly budget with 10 percent of the window spent was reported as fully
+exhausted. Every other fixture keeps `severity`, `text` and `percentage` byte-identical;
+only `metrics` gains `windowUsage`. As in M2, the only row that had to change was the one
+pinning metric keys - `metrics-order-preserved`, whose `keys_unsorted` list gains
+`"windowUsage"` last, since `builtins.toJSON` sorts keys.
+
+One deliberate fidelity regression, recorded so it is not mistaken for an oversight.
+`or-window-no-remaining.json` has a `limit` but a null `limit_remaining`; `percent` goes
+from a wrong-but-present 25 to null. Severity stays `ok` because a `percentOf` metric is
+never required. That is the same judgement as D-21: a visible gap beats a plausible wrong
+answer.
+
+**Blocker, and a real coverage gap it exposed.** M3.2 failed 8 rows, not 5. All five
+pre-existing openrouter rows collapsed to `windowUsage: null`, `percent: null`,
+`severity: ok`. The cause is D-5: the core never evaluates a filter, the shell
+pre-evaluates and passes values via `--argjson expressions`, and `checks/core` only passed
+`expressions` when a row declared them by hand. Re-pointing the shipped `percent` at an
+`expression` metric therefore nulled it in all 14 openrouter rows.
+
+Hand-feeding `expressions` per row would have made them green while leaving the shipped
+`windowUsage` **filter** with zero executable coverage anywhere: `checks/config` pins it
+only as text, and `checks/runtime` drives its own hand-written config by design (D-19). The
+tests would have asserted their own restated arithmetic. So `checks/core` now pre-evaluates
+each config's `from.expression` filters against the fixture body, mirroring
+`module/package.nix` lines 231-240 including its collapse-to-null error handling, with a
+row's declared `expressions` applied as an override on top. The accepted cost is a second
+copy of the orchestrator's pre-evaluation step in the check harness; the benefit is that a
+shipped filter is actually executed somewhere.
+
+That change also retired a piece of accidental coverage: `expression-metric-sums` had been
+supplying `expressions = {total = 6;}` by hand. Measured against the config, `[.data[].v]
+| add` over `{"data":[{"v":1},{"v":2},{"v":3}]}` is exactly 6, so the override agreed and
+was masking nothing - but it restated what the filter was supposed to compute. It is gone,
+replaced by `extra = [".metrics.total == 6"]`.
+
+Second vacuous-RED finding, matching M2's `timestamp-total`. The row
+`openrouter-unlimited-has-no-window-usage` passed before the feature existed, because in jq
+an absent key reads as `null`, so `.metrics.windowUsage == null` already held. A row or law
+asserting "is null" cannot RED on a missing feature. Only rows pinning a *value* red.

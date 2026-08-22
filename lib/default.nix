@@ -177,9 +177,39 @@ in {
           required = false;
           nullText = "∞";
         };
+        # D-23. Usage against the *active limit window*. `limit_remaining` is
+        # already window-scoped server-side, so subtracting it from `limit`
+        # gives window spend without this configuration having to know what
+        # `limit_reset` says, and without breaking on a reset period we have
+        # never seen. `.data["usage_" + reset]` would couple us to that enum.
+        #
+        # The null guard is explicit rather than inherited: a jq error in a
+        # pre-evaluated expression already collapses to null in
+        # module/package.nix, but relying on that would be accidental
+        # correctness. `dollars` rather than `raw` because float subtraction
+        # produces artefacts -- 20 - 12.05 is 7.949999999999999 -- and the
+        # unit's clamp-and-floor is what hides them.
+        windowUsage = {
+          from.expression = ''
+            if (.data.limit == null) or (.data.limit_remaining == null)
+            then null
+            else .data.limit - .data.limit_remaining
+            end
+          '';
+          unit = "dollars";
+          required = false;
+          nullText = "∞";
+        };
+        # Dividing all-time `usage` by a windowed `limit` reported a
+        # long-lived account as permanently over budget. `usage` is retained
+        # above as informational lifetime spend; only the ratio moved.
+        #
+        # A3 holds: both operands are pass-1 metrics, `windowUsage` by
+        # expression and `limit` by path, so this is not a percentOf of a
+        # percentOf.
         percent = {
           from.percentOf = {
-            of = "usage";
+            of = "windowUsage";
             total = "limit";
           };
           unit = "percent";

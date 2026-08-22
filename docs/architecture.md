@@ -394,7 +394,14 @@ programs.aiUsage.providers.openrouter = {
     usage = { from.path = ["data" "usage"]; unit = "dollars"; };
     limit = { from.path = ["data" "limit"]; unit = "dollars"; required = false; nullText = "∞"; };
     remaining = { from.path = ["data" "limit_remaining"]; unit = "dollars"; required = false; nullText = "∞"; };
-    percent = { from.percentOf = { of = "usage"; total = "limit"; }; unit = "percent"; };
+    windowUsage = {
+      from.expression = ''
+        if (.data.limit == null) or (.data.limit_remaining == null)
+        then null else .data.limit - .data.limit_remaining end
+      '';
+      unit = "dollars"; required = false; nullText = "∞";
+    };
+    percent = { from.percentOf = { of = "windowUsage"; total = "limit"; }; unit = "percent"; };
   };
   rules = [ { metric = "percent"; warnAt = 80; criticalAt = 90; } ];
   format = "{usage}/{limit}";
@@ -405,6 +412,20 @@ programs.aiUsage.providers.openrouter = {
 An unlimited key (`limit == null`) renders `$7/∞`; `percent` is null, so no rule
 fires and the severity is `ok`. A zero or absent `limit` likewise yields no
 percentage rather than a bogus 100 %.
+
+Note which quantity the ratio is taken over. OpenRouter's `usage` is lifetime
+spend, while `limit` applies to the period named by `limit_reset`, so
+`percentOf(usage, limit)` compares two different windows and reports a long-lived
+account as permanently over budget. `limit_remaining` is already window-scoped
+server-side, so `limit - limit_remaining` is spend against the active window
+whatever the reset period is, and needs no knowledge of the `limit_reset` enum.
+`usage` is kept as informational lifetime spend; only the denominator's partner
+moved. This is legal under assertion 3 because both `percentOf` operands are
+pass-1 metrics — `windowUsage` by expression, `limit` by path.
+
+When the server reports a `limit` but no `limit_remaining`, `windowUsage` and
+hence `percent` are null: no severity signal rather than a plausible wrong one,
+the same judgement as the non-UTC timestamp rule above.
 
 ## Worked example — a command provider
 
@@ -432,7 +453,7 @@ Note the descending-threshold form for a "credit remaining" style provider:
 
 | Check | Layer | Pins |
 | --- | --- | --- |
-| `core` | pure core semantics | 36 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety, timestamp parsing |
+| `core` | pure core semantics | 41 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety, timestamp parsing, window-scoped ratios |
 | `laws` | universally quantified properties of the core | 552 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, timestamp totality, determinism |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
 | `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
@@ -443,6 +464,15 @@ defaults are pinned. **Consumers must not re-pin them.** A downstream test may
 assert on composition — that a user enabled the module, that `settings` has the
 providers it expects, that the credential path tracks `home.homeDirectory` — but
 endpoints, thresholds, format strings and units have exactly one owner, here.
+
+`checks/core` pre-evaluates `from.expression` filters itself, mirroring the loop
+in `module/package.nix` with the same error handling, because jq has no `eval` and
+the core receives expression *values* rather than filters. The duplication is
+deliberate: a shipped filter is only genuinely covered if some check *executes*
+it, and no other layer does. `checks/config` pins a filter as text only, and
+`checks/runtime` drives its own hand-written config by design. A row may still
+declare `expressions` explicitly, which is applied as an override on top of the
+resolved values, for a value the orchestrator can produce but a filter cannot.
 
 `checks/module` evaluates the module with `lib.evalModules` against a ~20-line
 stub of the three Home Manager options it touches (`home.homeDirectory`,

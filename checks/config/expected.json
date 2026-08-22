@@ -95,7 +95,7 @@
         "percent": {
           "from": {
             "percentOf": {
-              "of": "usage",
+              "of": "windowUsage",
               "total": "limit"
             }
           },
@@ -114,6 +114,14 @@
             "path": ["data", "usage"]
           },
           "required": true,
+          "unit": "dollars"
+        },
+        "windowUsage": {
+          "from": {
+            "expression": "if (.data.limit == null) or (.data.limit_remaining == null)\nthen null\nelse .data.limit - .data.limit_remaining\nend\n"
+          },
+          "nullText": "∞",
+          "required": false,
           "unit": "dollars"
         }
       },

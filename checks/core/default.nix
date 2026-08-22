@@ -196,6 +196,92 @@
       text = "?";
     }
     # ------------------------------------------------------------ openrouter
+    #
+    # D-23. `percent` is usage against the *active limit window*, derived as
+    # `limit - limit_remaining`, because `limit_remaining` is already window
+    # scoped server-side. The previous configuration divided all-time `usage`
+    # by a windowed `limit`, which is only correct for an account whose
+    # lifetime spend happens to equal its current window spend -- which is
+    # true of every fixture minted before this change, and is why the suite
+    # could not see the defect. `or-window.json` is the fixture that can.
+    {
+      # The whole milestone in one row. Old: `percent = 500/200 -> 100`,
+      # critical, a 200-dollar monthly budget reported as fully spent.
+      # New: `windowUsage = 200 - 180 = 20`, `percent = 10`, ok.
+      name = "openrouter-percent-is-window-scoped";
+      config = "openrouter.json";
+      provider = "openrouter";
+      body = "or-window.json";
+      severity = "ok";
+      text = "$500/$200";
+      extra = [
+        ".metrics.windowUsage == 20"
+        ".metrics.percent == 10"
+        ".percentage == 10"
+        # `usage` stays exposed as informational all-time spend.
+        ".metrics.usage == 500"
+      ];
+    }
+    {
+      # The real captured payload, redacted. Both the old and the new
+      # derivation give 77 here, so production traffic never discriminated
+      # the fix; only a minted fixture could.
+      name = "openrouter-window-real-shape";
+      config = "openrouter.json";
+      provider = "openrouter";
+      body = "or-window-real.json";
+      severity = "ok";
+      text = "$155/$200";
+      extra = [
+        ".metrics.windowUsage == 155"
+        ".percentage == 77"
+      ];
+    }
+    {
+      # A windowed limit whose remainder the server did not report. `percent`
+      # is null rather than the wrong-but-present 25 the old derivation gave.
+      # Severity stays ok because a `percentOf` metric is never required:
+      # the same judgement as D-21, a visible gap over a plausible wrong
+      # answer.
+      name = "openrouter-window-without-remaining-is-null";
+      config = "openrouter.json";
+      provider = "openrouter";
+      body = "or-window-no-remaining.json";
+      severity = "ok";
+      text = "$50/$200";
+      extra = [
+        ".metrics.windowUsage == null"
+        ".metrics.percent == null"
+        ".percentage == null"
+      ];
+    }
+    {
+      # `limit == null`: no window exists, so there is no window usage.
+      name = "openrouter-unlimited-has-no-window-usage";
+      config = "openrouter.json";
+      provider = "openrouter";
+      body = "or-unlimited.json";
+      severity = "ok";
+      text = "$7/∞";
+      extra = [
+        ".metrics.windowUsage == null"
+        ".percentage == null"
+      ];
+    }
+    {
+      # `limit == 0`: the window exists and nothing is spent in it, but
+      # `pass2` guards `total <= 0`, so the ratio stays null.
+      name = "openrouter-zero-limit-window-usage-is-zero";
+      config = "openrouter.json";
+      provider = "openrouter";
+      body = "or-zero-limit.json";
+      severity = "ok";
+      text = "$0/$0";
+      extra = [
+        ".metrics.windowUsage == 0"
+        ".metrics.percent == null"
+      ];
+    }
     {
       name = "openrouter-good";
       config = "openrouter.json";
@@ -345,14 +431,20 @@
       extra = [''.tooltip | test("∞")''];
     }
     # ---------------------------------------- D-5: pre-evaluated expressions
+    #
+    # No `expressions` here on purpose. The harness resolves `[.data[].v] | add`
+    # from the config against the fixture, so this row exercises the filter
+    # rather than a value restating what the filter is supposed to compute. The
+    # `expressions` field remains available as an override for a value the
+    # orchestrator could produce but a filter cannot be made to.
     {
       name = "expression-metric-sums";
       config = "expression-sum.json";
       provider = "expression-sum";
       body = "expr-sum.json";
-      expressions = {total = 6;};
       severity = "ok";
       text = "$6";
+      extra = [".metrics.total == 6"];
     }
     # ------------------------------------------------ percentOf edge and D-11
     {
@@ -402,7 +494,9 @@
       severity = "ok";
       text = "$7/$20";
       extra = [
-        ''(.metrics | keys_unsorted) == ["limit", "percent", "remaining", "usage"]''
+        # Order follows the config, which `builtins.toJSON` emits with sorted
+        # keys, so `windowUsage` lands last. D-23 added it.
+        ''(.metrics | keys_unsorted) == ["limit", "percent", "remaining", "usage", "windowUsage"]''
       ];
     }
   ];
@@ -412,6 +506,13 @@
     then ''--arg body ""''
     else "--rawfile body ${fixtures}/${c.body}";
 
+  # `pre_evaluate` reads the body from a file, so an absent body is the empty
+  # input rather than a missing argument.
+  bodyPath = c:
+    if c.body == null
+    then "/dev/null"
+    else "${fixtures}/${c.body}";
+
   mkCase = c: let
     metaJson = builtins.toJSON (freshMeta // (c.meta or {}));
     exprJson = builtins.toJSON (c.expressions or {});
@@ -419,10 +520,12 @@
       f: "assert_jq ${lib.escapeShellArg c.name} ${lib.escapeShellArg f} \"$got\"\n"
     ) (c.extra or []);
   in ''
+    expressions=$(pre_evaluate ${configs}/${c.config} ${bodyPath c})
+    expressions=$(jq -c --argjson o ${lib.escapeShellArg exprJson} '. + $o' <<<"$expressions")
     got=$(jq -n -c --from-file ${jqProgram} \
       --argjson provider "$(cat ${configs}/${c.config})" \
       ${mkBodyArg c} \
-      --argjson expressions ${lib.escapeShellArg exprJson} \
+      --argjson expressions "$expressions" \
       --argjson meta ${lib.escapeShellArg metaJson})
     assert_case ${lib.escapeShellArg c.name} ${lib.escapeShellArg c.provider} \
       ${lib.escapeShellArg c.severity} ${lib.escapeShellArg c.text} "$got"
@@ -431,6 +534,30 @@
 in
   pkgs.runCommand "check-ai-usage" {nativeBuildInputs = [pkgs.jq];} ''
     fail=0
+
+    # D-5: jq has no `eval`, so `expression` metrics are resolved before the core
+    # runs and reach it as `--argjson expressions`. This mirrors the orchestrator
+    # loop in module/package.nix, deliberately and with the same error handling:
+    # a filter that fails, or emits something unparsable, yields null.
+    #
+    # The duplication is the point. A shipped `from.expression` filter is only
+    # genuinely covered if a check *executes* it; hand-feeding `expressions` per
+    # row would assert the row's own restated arithmetic and leave the filter
+    # that ships with no executable coverage anywhere -- `checks/config` pins it
+    # only as text, and `checks/runtime` uses its own config by design (D-19).
+    pre_evaluate() {
+      _provider="$1"
+      _body="$2"
+      _out='{}'
+      for _m in $(jq -r '(.metrics // {}) | to_entries[]
+                         | select(.value.from | has("expression")) | .key' "$_provider"); do
+        _filter=$(jq -r --arg m "$_m" '.metrics[$m].from.expression' "$_provider")
+        _value=$(jq -c "$_filter" "$_body" 2>/dev/null) || _value=null
+        printf '%s' "$_value" | jq -e . >/dev/null 2>&1 || _value=null
+        _out=$(jq -c --arg m "$_m" --argjson v "$_value" '. + {($m): $v}' <<<"$_out")
+      done
+      printf '%s' "$_out"
+    }
 
     assert_jq() {
       if ! printf '%s' "$3" | jq -e "$2" >/dev/null 2>&1; then
