@@ -925,9 +925,9 @@ a fresh session can resume without re-deriving it.
 
 Landed and green: **M1** (law harness plus `nullText` escaping), **M2** (`from.timestamp`,
 Claude `resetsAt`), **M3** (OpenRouter window-scoped `percent`), **M4** (opt-in `extras`),
-**M4b** (per-metric `floor`, not originally in this plan). Everything from section 6 up to
-and including M4b is **current behaviour**, not proposal. Still unimplemented: **M5**
-(`--raw`, D-26) and **M6** (docs, decision register, unused-field register).
+**M4b** (per-metric `floor`, not originally in this plan), **M5** (`--raw`). Everything from
+section 6 up to and including M5 is **current behaviour**, not proposal. Still
+unimplemented: **M6** (docs, decision register, unused-field register).
 
 Resuming. The gate is `nix flake check path:$PWD --no-write-lock-file --keep-going`, which
 must report six derivations: `checks.x86_64-linux.{core,laws,config,runtime,module}` and
@@ -1330,3 +1330,64 @@ behaviours) and `openrouter-remaining-precise.json` (descending rule, `floor = f
 without truncation -- the pin is the teeth, since `norm-integral` is deliberately silent on
 those instances and a family without a pinned expectation would pass against a core that
 ignored the flag.
+
+### M5 - `--raw`, complete
+
+Delivered: `--raw` in `module/package.nix` (30 insertions, 3 deletions, of which 8 lines are
+the feature and the rest are comments and the usage string), ten `--raw` scenarios plus the
+biconditional law in `checks/runtime`, and a `--raw` subsection in `README.md`. Six
+derivations green.
+
+| Step | Verified |
+| ---- | -------- |
+| M5.1 RED | runtime, exit 1, 17 failures. Every raw invocation exits 2, because `-*)` already falls through to `usage_error`. |
+| M5.2 GREEN | runtime exit 0. `writeShellApplication` re-ran `shellcheck` and `bash -n` on the new branch as part of building `ai-usage.drv`. |
+| M5.3 | `README.md`: `--raw` subsection, and the "always exit 0" claim qualified to document mode. |
+| gate | `nix flake check --keep-going`: core, laws, config, runtime, module, formatter, all passed |
+
+**The biconditional law is vacuous in RED, and this is the third instance of that pattern in
+this plan.** In RED every raw invocation exits 2 with empty stdout, which *satisfies*
+`exit != 0 => stdout empty`. The law only becomes a guard once the feature exists. What
+reds is the seven value-pinning assertions -- `raw-fresh-body`, `raw-*-exit`,
+`raw-fresh-cache-body`, `raw-alt-config-body`. Same lesson as `timestamp-total` in M2 and
+`openrouter-unlimited-has-no-window-usage` in M3: **an assertion of the form "is null",
+"is empty" or "is a biconditional over a failing path" cannot detect a missing feature.**
+Pair every law with at least one row pinning a value.
+
+Teeth, by mutation. Three mutations, three killed, and the split between which assertion
+catches which is the interesting part:
+
+| Mutation | Killed by |
+| -------- | --------- |
+| `exit 1` -> `exit 0` on an empty body | `raw-biconditional` on `raw-cold-fail` and `raw-dead`, plus the two exit pins |
+| read `.body` straight from `$cache`, bypassing the staleness resolution | `raw-dead-exit` and `raw-dead-stdout` only -- **the law is silent**, since exit 0 with a non-empty stdout is legal |
+| `printf '%s\n' "$body" >&2` | five `raw-biconditional` rows plus four body pins and `raw-fresh-stderr` |
+
+The middle row is the one to remember: the biconditional cannot see a *correctness* error,
+only a *protocol* error. Placement after the staleness resolution -- which is what makes
+scenario 5 drop a body older than `maxStaleAge` -- is held in place by the value pin alone.
+
+Two departures from the plan's M5.2, both small.
+
+**`rm -f "$errFile"` had to move.** The plan places the raw block before expression
+pre-evaluation, but the cleanup sat *after* it, so an early `exit` would leak a temp file per
+invocation. The cleanup moved up to immediately after the fetch critical section, which is
+the last point `$errFile` is read (`--rawfile` at the cache write, `cat` to stderr). Net
+effect on document mode: none.
+
+**Scenario 8 needs a second valid config, not `configV2`.** The existing alternate config is
+version 2 and exits 1, which proves nothing about `--raw --config`. `checks/runtime` now also
+builds `configAlt`, a version-1 config whose sole provider `altp` is absent from the default
+one, so the flag is proven two-sidedly: `ai-usage altp --raw --config <alt>` yields the
+alternate body at exit 0, and `ai-usage altp --raw` without it is a usage error at exit 2.
+
+Scenario 2 -- "stdout equals the body the document was derived from" -- is implemented as
+three assertions on one invocation rather than a second one: stdout parses as JSON, equals
+`jq -r .body` of the cache file, and the document from the same warm cache renders `$7`. The
+law therefore quantifies over seven recorded invocations, not eight, and `raw-law-rows` pins
+that count so a silently skipped scenario fails the check.
+
+Behaviour worth restating because it is not obvious from the diff: `--raw` inherits
+`--refresh`, retry throttling and stale serving *for free*, because it consumes `$body` after
+resolution rather than calling `fetch` itself. Scenarios 4, 6 and 7 pass without a line of
+raw-specific code, which is the whole argument for that placement.

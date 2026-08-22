@@ -157,9 +157,10 @@ than most bars need; only the wire format differs.
 
 ## Output
 
-Always exit `0`, always one valid JSON object on stdout — a failed read is a
-document with `severity = "unknown"`, `text = "?"` and a non-null `error`, never
-a crash that breaks your bar. Severities are `ok < warn < critical < unknown`.
+In document mode, always exit `0`, always one valid JSON object on stdout — a
+failed read is a document with `severity = "unknown"`, `text = "?"` and a
+non-null `error`, never a crash that breaks your bar. Severities are
+`ok < warn < critical < unknown`.
 
 Successful bodies are cached under `$XDG_CACHE_HOME/ai-usage/<provider>.json`
 with a `flock`, so several bar blocks polling at once make one request. A
@@ -171,6 +172,23 @@ to `?`.
 Exit codes are `0` normally, `1` for a config error and `2` for a usage error.
 Use `--refresh` to force a fetch, and `--config <path>` (or `$AI_USAGE_CONFIG`)
 to run against a scratch config without a rebuild.
+
+### `--raw`
+
+`ai-usage <provider> --raw` prints the upstream response body instead of the
+document, which is how you mint a fixture without reconstructing the request and
+its credential by hand:
+
+```sh
+ai-usage claude --raw > checks/core/fixtures/my-capture.json
+```
+
+It reuses the same cache, lock and staleness policy, so `--refresh` and
+throttling behave identically. It is an ordinary Unix filter rather than the
+status-bar protocol, and therefore **exits `0` if and only if it wrote a body** —
+never an empty file reported as success. A stale body still counts as a body: it
+is printed with exit `0` and the fetch error goes to stderr. Output is byte-exact
+apart from trailing whitespace, which is normalised to a single newline.
 
 ## Development
 

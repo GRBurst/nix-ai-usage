@@ -12,6 +12,11 @@
 #
 # Exit codes: 0 success (including a failed network read, which yields a
 # `severity = "unknown"` document), 2 usage error, 1 config error.
+#
+# `--raw` is the one exception to "always exit 0", and deliberately so (D-26):
+# document mode implements the status-bar protocol, where a non-zero child means
+# a broken module, while `--raw` is an ordinary Unix filter and exits 0 if and
+# only if it wrote a body.
 {
   writeShellApplication,
   bash,
@@ -30,6 +35,7 @@ writeShellApplication {
     configPath="''${AI_USAGE_CONFIG:-$defaultConfig}"
     providerName=""
     refresh=0
+    rawMode=0
 
     die() {
       printf 'ai-usage: %s\n' "$1" >&2
@@ -42,7 +48,7 @@ writeShellApplication {
         known=$(jq -r '(.providers // {}) | keys | join(", ")' "$configPath" 2>/dev/null) || known=""
       fi
       {
-        printf 'usage: ai-usage <provider> [--refresh] [--config <path>]\n'
+        printf 'usage: ai-usage <provider> [--refresh] [--raw] [--config <path>]\n'
         printf 'known providers: %s\n' "$known"
       } >&2
       exit 2
@@ -51,6 +57,7 @@ writeShellApplication {
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --refresh) refresh=1 ;;
+        --raw) rawMode=1 ;;
         --config)
           shift
           [ "$#" -gt 0 ] || usage_error
@@ -211,6 +218,8 @@ writeShellApplication {
       exec 9>&-
     fi
 
+    rm -f "$errFile"
+
     if [ "$(jq -r '.ok // false' <<<"$cache")" = true ]; then
       body=$(jq -r '.body // ""' <<<"$cache")
       meta='{"stale":false,"age":0,"error":null}'
@@ -228,6 +237,23 @@ writeShellApplication {
       fi
     fi
 
+    # Raw mode reuses the resolution above verbatim, so it shares one cache,
+    # lock and staleness policy with document mode rather than reimplementing a
+    # fetch; that is why `--refresh`, throttling and stale serving come for free.
+    # It sits before expression pre-evaluation because raw mode needs none of it.
+    #
+    # The body has round-tripped through `$(...)`, which strips trailing
+    # newlines, so this is byte-exact modulo trailing whitespace. A stale body is
+    # still a body: it is printed with exit 0, and the error is already on
+    # stderr. `stale` and `age` are document-mode concepts.
+    if [ "$rawMode" = 1 ]; then
+      if [ -n "$body" ]; then
+        printf '%s\n' "$body"
+        exit 0
+      fi
+      exit 1
+    fi
+
     # jq has no `eval`, so `expression` metrics are pre-evaluated here and
     # handed to the pure core as `--argjson expressions`.
     expressions='{}'
@@ -238,8 +264,6 @@ writeShellApplication {
       printf '%s' "$value" | jq -e . >/dev/null 2>&1 || value=null
       expressions=$(jq -c --arg m "$metric" --argjson v "$value" '. + {($m): $v}' <<<"$expressions")
     done < <(jq -r '(.metrics // {}) | to_entries[] | select(.value.from | has("expression")) | .key' <<<"$provider")
-
-    rm -f "$errFile"
 
     exec jq -n -c --from-file ${./ai-usage.jq} \
       --argjson provider "$provider" \

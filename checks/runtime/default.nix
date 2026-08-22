@@ -111,6 +111,17 @@
     providers = {};
   });
 
+  # Alternate valid config whose sole provider is absent from the default one, so
+  # `--raw --config` is proven two-sidedly: it succeeds here and exits 2 without.
+  configAlt = pkgs.writeText "ai-usage-runtime-config-alt.json" (builtins.toJSON {
+    version = 1;
+    providers.altp =
+      baseProvider
+      // {
+        source.command = "printf '{\"usage\":99}'";
+      };
+  });
+
   stubCurl = pkgs.writeShellScriptBin "curl" ''
     printf '1\n' >>"$AI_USAGE_TEST_CALLS"
     printf '%s\n' "$@" >>"$AI_USAGE_TEST_ARGS"
@@ -342,6 +353,124 @@ in
     if [ "$concurrent" != 1 ]; then
       printf 'WARN: concurrent-single-fetch expected 1 curl call, got %s (best effort)\n' "$concurrent" >&2
     fi
+
+    ##########################################################################
+    # --raw (D-26)
+    #
+    # `--raw` is an ordinary Unix filter, not the status-bar protocol: it exits
+    # 0 if and only if it wrote a body, so `ai-usage claude --raw > fixture.json`
+    # can never leave an empty file behind and report success. Every scenario is
+    # recorded and the biconditional is checked over all of them at the end.
+    ##########################################################################
+    rawLaw="$TMPDIR/raw-law"
+    : >"$rawLaw"
+
+    # Run `ai-usage "$@"`, exposing $rawRc and $raw, and record the
+    # (exit code, stdout emptiness) pair the law quantifies over.
+    raw_run() {
+      rawName="$1"
+      shift
+      rawRc=0
+      ai-usage "$@" >"$TMPDIR/raw.out" 2>"$TMPDIR/raw.err" || rawRc=$?
+      raw=$(cat "$TMPDIR/raw.out")
+      if [ -s "$TMPDIR/raw.out" ]; then
+        printf '%s %s nonempty\n' "$rawName" "$rawRc" >>"$rawLaw"
+      else
+        printf '%s %s empty\n' "$rawName" "$rawRc" >>"$rawLaw"
+      fi
+    }
+
+    # 1 + 2: fresh fetch. stdout is the upstream body verbatim, it is the same
+    # body the document was derived from, and stderr stays clean.
+    reset_cache
+    reset_calls
+    raw_run raw-fresh httpok --raw
+    assert_eq raw-fresh-exit 0 "$rawRc"
+    assert_eq raw-fresh-calls 1 "$(calls)"
+    assert_eq raw-fresh-body '{"usage":7}' "$raw"
+    assert_jq raw-fresh-parses '.usage == 7' "$raw"
+    assert_eq raw-fresh-cache-body "$(jq -r '.body' "$cacheDir/httpok.json")" "$raw"
+    if [ -s "$TMPDIR/raw.err" ]; then
+      note "raw-fresh-stderr: expected empty stderr, got $(cat "$TMPDIR/raw.err")"
+    fi
+    assert_jq raw-fresh-document-agrees '.text == "$7"' "$(ai-usage httpok)"
+
+    # 6: within refreshInterval, `--raw` reuses the cache like document mode.
+    reset_calls
+    raw_run raw-throttled httpok --raw
+    assert_eq raw-throttled-exit 0 "$rawRc"
+    assert_eq raw-throttled-calls 0 "$(calls)"
+    assert_eq raw-throttled-body '{"usage":7}' "$raw"
+
+    # 7: --refresh still forces a fetch in raw mode.
+    reset_calls
+    raw_run raw-refresh httpok --raw --refresh
+    assert_eq raw-refresh-exit 0 "$rawRc"
+    assert_eq raw-refresh-calls 1 "$(calls)"
+
+    # 3: cold cache, failing fetch. No body to write, so exit 1 and say why.
+    reset_cache
+    reset_calls
+    export AI_USAGE_TEST_FAIL=1
+    raw_run raw-cold-fail httpok --raw
+    assert_eq raw-cold-fail-exit 1 "$rawRc"
+    assert_eq raw-cold-fail-stdout "" "$raw"
+    if [ ! -s "$TMPDIR/raw.err" ]; then
+      note "raw-cold-fail-stderr: expected an actionable message on stderr"
+    fi
+
+    # 4: failing fetch over a cache still within maxStaleAge. The stale body is
+    # a body, so it is written and the exit stays 0; the error is on stderr.
+    unset AI_USAGE_TEST_FAIL
+    reset_cache
+    ai-usage httpok >/dev/null
+    export AI_USAGE_TEST_FAIL=1
+    age_cache httpok 301
+    reset_calls
+    raw_run raw-stale httpok --raw
+    assert_eq raw-stale-exit 0 "$rawRc"
+    assert_eq raw-stale-calls 1 "$(calls)"
+    assert_eq raw-stale-body '{"usage":7}' "$raw"
+    if [ ! -s "$TMPDIR/raw.err" ]; then
+      note "raw-stale-stderr: expected the fetch error on stderr"
+    fi
+
+    # 5: beyond maxStaleAge the body is dropped, so raw mode has nothing to say.
+    age_cache httpok 4000
+    raw_run raw-dead httpok --raw
+    assert_eq raw-dead-exit 1 "$rawRc"
+    assert_eq raw-dead-stdout "" "$raw"
+    unset AI_USAGE_TEST_FAIL
+
+    # 8: --config is honoured in raw mode. `altp` exists only in that config, so
+    # the same invocation without it is a usage error.
+    raw_run raw-alt-config altp --raw --config ${configAlt}
+    assert_eq raw-alt-config-exit 0 "$rawRc"
+    assert_jq raw-alt-config-body '.usage == 99' "$raw"
+
+    rc=0
+    output=$(ai-usage altp --raw 2>&1) || rc=$?
+    assert_eq raw-alt-config-not-default-exit 2 "$rc"
+
+    # 9 + 10: argument handling is unchanged by raw mode.
+    rc=0
+    output=$(ai-usage nope --raw 2>&1) || rc=$?
+    assert_eq raw-unknown-provider-exit 2 "$rc"
+
+    rc=0
+    output=$(ai-usage httpok --raw --bogus 2>&1) || rc=$?
+    assert_eq raw-unknown-flag-exit 2 "$rc"
+
+    ##########################################################################
+    # law: over every recorded raw invocation, exit 0 <=> stdout non-empty
+    ##########################################################################
+    assert_eq raw-law-rows 7 "$(wc -l <"$rawLaw" | tr -d ' ')"
+    while read -r lawName lawRc lawOut; do
+      case "$lawRc:$lawOut" in
+        0:nonempty | [1-9]*:empty) ;;
+        *) note "raw-biconditional: $lawName exited $lawRc with $lawOut stdout" ;;
+      esac
+    done <"$rawLaw"
 
     if [ "$fail" != 0 ]; then
       printf 'ai-usage runtime check failed\n' >&2
