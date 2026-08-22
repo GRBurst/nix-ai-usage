@@ -534,6 +534,259 @@
     value = [0 3 80 90 100 null];
   });
 
+  # Family G -- `from.timestamp` (D-20). A timestamp metric is `raw` and optional,
+  # so it must not move `severity`, and it must never make the document degrade.
+  timestampProvider = {
+    name = "laws";
+    metrics.t = {
+      from = {timestamp = {path = ["t"];};};
+      unit = "raw";
+      required = false;
+      nullText = "-";
+    };
+    rules = [];
+    format = "t={t}";
+    tooltipFormat = "at {t}";
+  };
+
+  # Every expectation below was produced by executing the `epoch` definition
+  # under jq 1.8.2 and cross-checking with `date -u -d @N`. The plan's original
+  # table was one day (86400 s) high on the first two rows.
+  timestampCases = [
+    # The two shapes the providers actually emit: Anthropic sends fractional
+    # seconds with an explicit `+00:00`, OpenRouter sends fractional plus `Z`.
+    {
+      input = "2026-08-21T23:10:00.029760+00:00";
+      expected = 1787353800;
+    }
+    {
+      input = "2026-08-24T20:00:00.029792+00:00";
+      expected = 1787601600;
+    }
+    {
+      input = "2027-08-05T12:19:00.001Z";
+      expected = 1817468340;
+    }
+    {
+      input = "2026-08-21T23:10:00Z";
+      expected = 1787353800;
+    }
+    # D-21: a non-UTC offset is rejected outright. Accepting it as if it were UTC
+    # would silently misplace the reset by hours, which is worse than no value.
+    {
+      input = "2026-08-21T23:10:00-05:00";
+      expected = null;
+    }
+    {
+      input = "2026-08-21T23:10:00+02:00";
+      expected = null;
+    }
+    # No zone at all is not UTC either.
+    {
+      input = "2026-08-21T23:10:00";
+      expected = null;
+    }
+    {
+      input = "";
+      expected = null;
+    }
+    {
+      input = "  ";
+      expected = null;
+    }
+    {
+      input = "not-a-date";
+      expected = null;
+    }
+    # An epoch that arrived as a string stays rejected: `epoch` parses a format,
+    # it does not guess.
+    {
+      input = "1787440200";
+      expected = null;
+    }
+    # Shape-valid but calendar-nonsense. This is the row that justifies keeping
+    # `try`/`catch` behind the regex guard rather than trusting either alone.
+    {
+      input = "2026-13-45T99:99:99Z";
+      expected = null;
+    }
+    # Non-strings, since a provider may send anything.
+    {
+      input = null;
+      expected = null;
+    }
+    {
+      input = 0;
+      expected = null;
+    }
+    {
+      input = [];
+      expected = null;
+    }
+    {
+      input = {};
+      expected = null;
+    }
+    {
+      input = true;
+      expected = null;
+    }
+  ];
+
+  familyTimestamp =
+    lib.imap0 (i: c:
+      mkInstance {
+        name = "timestamp-${toString i}";
+        provider = timestampProvider;
+        body = builtins.toJSON {t = c.input;};
+        expect = {metrics = {t = c.expected;};};
+      })
+    timestampCases
+    ++ [
+      # An absent path is not an error either: `at` yields null and the optional
+      # metric simply has no value.
+      (mkInstance {
+        name = "timestamp-absent";
+        provider = timestampProvider;
+        body = "{}";
+        expect = {metrics = {t = null;};};
+      })
+    ];
+
+  # Family H -- D-22, the accidental-`unknown` trap, in the shape the shipped
+  # Claude provider actually has. A reset timestamp exists to expose more of the
+  # payload to an adapter. If it were `required`, an account with a window it has
+  # never used -- for which Anthropic sends `resets_at: null` -- would blank the
+  # bar instead of showing the utilisation the API did send. `unknown-iff` states
+  # that in both directions, so this family generates both polarities: with
+  # `required = false` nothing degrades, and flipping the same instances to
+  # `required = true` must degrade every one whose timestamp fails to parse.
+  claudeShapedProvider = resetsRequired: {
+    name = "laws";
+    metrics = {
+      fiveHour = {
+        from = {path = ["five_hour" "utilization"];};
+        unit = "percent";
+        required = true;
+      };
+      fiveHourResetsAt = {
+        from = {timestamp = {path = ["five_hour" "resets_at"];};};
+        unit = "raw";
+        required = resetsRequired;
+      };
+      sevenDay = {
+        from = {path = ["seven_day" "utilization"];};
+        unit = "percent";
+        required = true;
+      };
+      sevenDayResetsAt = {
+        from = {timestamp = {path = ["seven_day" "resets_at"];};};
+        unit = "raw";
+        required = resetsRequired;
+      };
+    };
+    rules = [
+      {
+        metric = "fiveHour";
+        warnAt = 80;
+        criticalAt = 90;
+      }
+      {
+        metric = "sevenDay";
+        warnAt = 80;
+        criticalAt = 90;
+      }
+    ];
+    # As in the shipped defaults, neither reset metric appears in either
+    # template, so exposing them cannot change a single rendered byte.
+    format = "{fiveHour}%·{sevenDay}%";
+    tooltipFormat = "5h {fiveHour}% · 7d {sevenDay}%";
+  };
+
+  # Utilisations are fixed at the values in the recorded payload: 91 is critical
+  # under 80/90, so these instances also witness that a timestamp metric does not
+  # perturb a severity that the percent metrics already decided.
+  claudeBody = five: seven:
+    builtins.toJSON {
+      five_hour = {
+        utilization = 91;
+        resets_at = five;
+      };
+      seven_day = {
+        utilization = 68;
+        resets_at = seven;
+      };
+    };
+
+  claudeResetShapes = [
+    {
+      id = "present";
+      body = claudeBody "2026-08-21T23:10:00.029760+00:00" "2026-08-24T20:00:00.029792+00:00";
+      parses = true;
+    }
+    # The quiet-account case, verbatim from the recorded payload's unused windows.
+    {
+      id = "null";
+      body = claudeBody null null;
+      parses = false;
+    }
+    # One of two is enough to degrade, so the boundary is per-metric and not
+    # "all timestamps failed".
+    {
+      id = "mixed";
+      body = claudeBody "2026-08-21T23:10:00Z" null;
+      parses = false;
+    }
+    # A future API that starts sending a human-readable reset must not take the
+    # bar down with it.
+    {
+      id = "unparsable";
+      body = claudeBody "soon" "in 3 days";
+      parses = false;
+    }
+    # The field disappearing entirely is the same situation as a null one.
+    {
+      id = "absent";
+      body = builtins.toJSON {
+        five_hour = {utilization = 91;};
+        seven_day = {utilization = 68;};
+      };
+      parses = false;
+    }
+  ];
+
+  familyClaudeResets = map (c: let
+    degenerate = c.required && !c.shape.parses;
+  in
+    mkInstance {
+      name = "claude-resets-${c.shape.id}-${
+        if c.required
+        then "required"
+        else "optional"
+      }";
+      provider = claudeShapedProvider c.required;
+      body = c.shape.body;
+      expect =
+        {
+          inherit degenerate;
+          severity =
+            if degenerate
+            then "unknown"
+            else "critical";
+        }
+        // lib.optionalAttrs (c.shape.parses && !c.required) {
+          metrics = {
+            fiveHour = 91;
+            sevenDay = 68;
+            fiveHourResetsAt = 1787353800;
+            sevenDayResetsAt = 1787601600;
+          };
+        };
+    }) (lib.cartesianProduct {
+    shape = claudeResetShapes;
+    required = [false true];
+  });
+
   # ------------------------------------------------------------- pair families
 
   pairDeterminism = lib.concatMap (c:
@@ -635,6 +888,8 @@
     ++ familyBoundary
     ++ familyRatio
     ++ familyExpression
+    ++ familyTimestamp
+    ++ familyClaudeResets
     ++ pairDeterminism
     ++ pairPermutation
     ++ pairInclusion

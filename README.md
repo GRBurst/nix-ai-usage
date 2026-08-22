@@ -91,6 +91,13 @@ onto a severity, and how to `format` the result. Metric names double as template
 tokens. Misconfiguration is caught at evaluation time by nine assertions, not at
 runtime in your bar.
 
+A metric can also read a timestamp: `from.timestamp.path` parses an ISO-8601 UTC
+instant to epoch seconds, or to `null` when the provider sends something else.
+The shipped `claude` provider uses this for `fiveHourResetsAt` and
+`sevenDayResetsAt`, which appear in `metrics` but in no template — so a countdown
+is available to your adapter without this repository deciding how time is
+formatted.
+
 `programs.aiUsage.settings` exposes the rendered config document read-only, so
 your own tests can assert on what the module produced.
 

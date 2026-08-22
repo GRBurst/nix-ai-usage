@@ -1013,3 +1013,78 @@ against reintroducing a clock into the core, and it demonstrably works.
 Two laws survived every mutation attempted, `norm-monotone` and `pct-max`. They are guards
 for future changes rather than current regressions; that is not a reason to drop them, but
 they are unproven.
+
+### M2 - `from.timestamp` plus Claude `resetsAt`, complete
+
+Delivered: `epoch` plus a `timestamp` branch in `pass1` (core), a `timestamp` arm in
+`valueType` (module), `fiveHourResetsAt` / `sevenDayResetsAt` on the shipped `claude`
+provider (lib), and coverage in all four affected check layers. Five checks green.
+
+| Step       | Verified                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| M2.1 RED   | laws exit 1, 4 violations, all `metrics-expected`, on `timestamp-0..3`                                                 |
+| M2.2 GREEN | 542 instances, 560 core runs, 0 violations                                                                            |
+| M2.3 RED   | module check aborts: `from` "is not of type 'attribute-tagged union with choices: expression, path, percentOf'"        |
+| M2.3 GREEN | 3 new module rows pass, `failures == []`                                                                              |
+| M2.5 RED   | config check aborts: `attribute 'fiveHourResetsAt' missing`                                                            |
+| M2.6       | both goldens `+18/-0`, exactly the two new metric blocks                                                               |
+| M2.7       | 552 instances, 0 violations                                                                                           |
+| M2.8       | `nix flake check --keep-going`: core, laws, config, runtime, module, formatter, all passed                             |
+
+Four corrections to this plan, each found by executing it.
+
+**The RED signal for M2.1 is not the one the plan names.** The plan says `timestamp-total`
+"fails now, since there is no `timestamp` branch". It does not. `pass1`'s trailing
+`else null` already returns `null` for an unrecognised tag, and `null` satisfies
+number-or-null, so `timestamp-total` passes *vacuously* before the feature exists. The real
+signal is `metrics-expected` on the four rows pinning a parsed epoch. `timestamp-total`
+earns its keep afterwards, as the totality guard over the thirteen adversarial rejection
+rows.
+
+**`$doc | getpath(...)` raises when `$doc` is null.** The plan's literal `pass1` branch
+would crash the core on an unparsable body, precisely the case the document contract exists
+for. Use the existing `at($doc; $path)` helper, which guards it.
+
+**M2.4 was a no-op.** `renderMetric` does `inherit (m) from unit;`, so `from` passes through
+opaquely and a new tag needs no lib change. Only the M2.5 defaults did.
+
+**One existing `checks/core` row had to change, contrary to section 7.** Regenerating
+`checks/core/configs/claude.json` - which section 7 permits only for
+`checks/config/expected.json`, but which the `checks/config` drift assertion forces - makes
+`claude-good`'s `.metrics == {fiveHour, sevenDay}` false. Its `severity`, `text`,
+`tooltip`, `percentage`, `stale` and `error` are byte-identical; only `metrics` grew. The
+row was widened rather than deleted, and that is D-22 observed at a named point: exposing
+more of the payload adds to `metrics` and to nothing else. Every future milestone that adds
+a metric to a shipped provider hits this same coupling.
+
+Also worth recording: the existing `claude-*` fixtures already carried bare-`Z` `resets_at`
+values, so they began parsing the moment the feature landed (`claude-low.json` yields
+1787140800 / 1787529600). That is why `claude-resets-parse-to-epoch-seconds` reuses an
+existing fixture instead of adding one.
+
+Teeth, by mutation. Mutating `isRequired` so `$m.required` reads `false` - every metric
+optional, the D-22 trap in reverse - gives exit 1 with 29 violations: 4 `severity-expected`
+and 25 `unknown-iff`, the named instances being exactly
+`claude-resets-{absent,mixed,null,unparsable}-required`. The `unknown` biconditional is a
+real guard in both directions, not a restatement of what `checks/core` already had.
+
+Golden regeneration recipe, since the repository ships no tool for it. The goldens are
+sorted-key, two-space indent, scalar arrays inlined, object arrays expanded. `jq -S .` does
+not reproduce that; a 20-line jq formatter does, and round-trips all four pre-existing
+golden files byte-identically.
+
+```sh
+nix eval --impure --raw --expr '
+  let lib = (builtins.getFlake "path:/abs/path/to/repo").inputs.nixpkgs.lib;
+      aiLib = import /abs/path/to/repo/lib { inherit lib; };
+  in builtins.toJSON (aiLib.mkConfig {
+       providers = aiLib.providerDefaults { homeDirectory = "/home/testuser"; };
+     })' > cfg.json
+jq -r -f fmt.jq cfg.json                             > checks/config/expected.json
+jq -c '.providers.claude' cfg.json | jq -r -f fmt.jq > checks/core/configs/claude.json
+```
+
+`jq -f prog.jq` consumes the *program* from the file, so a filter cannot also be passed
+positionally; pipe a `jq -c '<filter>'` stage first. **Open follow-up: `fmt.jq` and this
+recipe belong in the repository**, because `AGENTS.md` requires goldens be re-cut
+deliberately rather than hand-edited, and currently offers no way to do it.

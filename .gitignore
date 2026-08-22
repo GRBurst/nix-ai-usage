@@ -1,0 +1,6 @@
+# Real provider responses, captured by hand for reference while developing.
+# They carry account identifiers, balances and key labels, so they must never
+# enter a commit or the Nix store. Test data lives in checks/core/fixtures/ and
+# is minted redacted. A bare `git add -A` would otherwise stage these.
+/claude_payload.json
+/openrouter_payload.json

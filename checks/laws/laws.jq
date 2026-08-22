@@ -98,6 +98,20 @@ def normalisation($r):
            {percentage: $r.doc.percentage, candidates: $p}))
   ;
 
+# `from.timestamp` resolves to whole epoch seconds or null, for any input at all
+# -- string, number, container, or absent. jq has no type system, so this law is
+# the only statement that the parse is total. `unit` is irrelevant here: an epoch
+# is `raw` precisely because percent and dollar clamping would destroy it.
+def timestamps($r):
+  $r.instance.provider.metrics
+  | to_entries[]
+  | select(.value.from | has("timestamp"))
+  | .key as $name
+  | ($r.doc.metrics[$name]) as $v
+  | law("timestamp-total"; $r;
+        $v == null or (($v | type) == "number" and ($v | floor) == $v);
+        {metric: $name, value: $v, type: ($v | type)});
+
 # Pinned expectations, present only on the instances that carry them. These are
 # the named points that make a generated suite readable.
 def pinned($r):
@@ -117,7 +131,7 @@ def unary($r):
     law("core-exit-0"; $r; $r.status == 0; {status: $r.status, raw: $r.raw})
   , law("core-json"; $r; ($r.doc | type) == "object"; {raw: $r.raw})
   , (if ($r.doc | type) == "object"
-     then shape($r), normalisation($r), pinned($r)
+     then shape($r), normalisation($r), timestamps($r), pinned($r)
      else empty end)
   ;
 

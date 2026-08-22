@@ -48,9 +48,73 @@
       extra = [
         ''.tooltip == "5h 12% · 7d 34%"''
         ".percentage == 34"
-        ''.metrics == {"fiveHour": 12, "sevenDay": 34}''
+        # The reset timestamps arrived with the shipped defaults, and `text`,
+        # `tooltip`, `percentage` and `severity` above are byte-identical to what
+        # this row asserted before them. That is D-22 at a named point: exposing
+        # more of the payload adds to `metrics` and to nothing else.
+        ''.metrics == {"fiveHour": 12, "fiveHourResetsAt": 1787140800, "sevenDay": 34, "sevenDayResetsAt": 1787529600}''
         ".stale == false"
         ".error == null"
+      ];
+    }
+    {
+      # 2026-08-19T12:00:00Z and 2026-08-24T00:00:00Z, cross-checked with
+      # `date -u -d @N`. The fixture writes a bare `Z`; the recorded payload uses
+      # fractional seconds and `+00:00`, which `claude-resets-offset` covers.
+      name = "claude-resets-parse-to-epoch-seconds";
+      config = "claude.json";
+      provider = "claude";
+      body = "claude-low.json";
+      severity = "ok";
+      text = "12%·34%";
+      extra = [
+        ".metrics.fiveHourResetsAt == 1787140800"
+        ".metrics.sevenDayResetsAt == 1787529600"
+      ];
+    }
+    {
+      # The shape Anthropic actually sends: fractional seconds and an explicit
+      # `+00:00` rather than `Z`.
+      name = "claude-resets-offset";
+      config = "claude.json";
+      provider = "claude";
+      body = "claude-resets-offset.json";
+      severity = "critical";
+      text = "91%·68%";
+      extra = [
+        ".metrics.fiveHourResetsAt == 1787353800"
+        ".metrics.sevenDayResetsAt == 1787601600"
+      ];
+    }
+    {
+      # A window the account has never used: Anthropic sends a null `resets_at`.
+      # The reset metrics are optional precisely so this stays a usable document
+      # rather than degrading to `unknown` (D-22).
+      name = "claude-resets-null-does-not-degrade";
+      config = "claude.json";
+      provider = "claude";
+      body = "claude-resets-null.json";
+      severity = "critical";
+      text = "91%·68%";
+      extra = [
+        ''.tooltip == "5h 91% · 7d 68%"''
+        ".metrics.fiveHourResetsAt == null"
+        ".metrics.sevenDayResetsAt == null"
+        ".error == null"
+      ];
+    }
+    {
+      # A non-UTC offset is rejected outright rather than reinterpreted as UTC
+      # (D-21): a reset silently misplaced by hours reads as authoritative.
+      name = "claude-resets-non-utc-offset-is-null";
+      config = "claude.json";
+      provider = "claude";
+      body = "claude-resets-offset-nonutc.json";
+      severity = "critical";
+      text = "91%·68%";
+      extra = [
+        ".metrics.fiveHourResetsAt == null"
+        ".metrics.sevenDayResetsAt == null"
       ];
     }
     {

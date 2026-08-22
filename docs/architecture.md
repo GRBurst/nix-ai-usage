@@ -112,12 +112,31 @@ actionable line goes to stderr and the document degrades, but the exit code stay
 | Tag | Fields | Pass |
 | --- | --- | --- |
 | `path` | list of strings | 1 |
+| `timestamp` | `path`, an ISO-8601 UTC instant | 1 |
 | `expression` | jq filter over the raw body | 1 (pre-evaluated by the orchestrator) |
 | `percentOf` | `of`, `total` | 2 |
+
+The tags are mutually exclusive by *type*: `metrics.<name>.from` is a
+`types.attrTag`, so `{path = ...; timestamp = ...;}` fails to evaluate rather
+than resolving by some undocumented precedence.
 
 `expression` is evaluated by `ai-usage`, not by the core, and handed in as a
 pre-computed value. The core therefore stays a pure function of its arguments,
 and a malformed filter cannot corrupt the document.
+
+`timestamp` yields **epoch seconds**, and should be paired with `unit = "raw"`:
+percent clamping and dollar flooring would both corrupt an instant. Emitting a
+number rather than a formatted string keeps time formatting out of this
+repository — a consumer that wants "resets in 42m" has everything it needs, and
+one that wants an absolute clock time can have that too.
+
+The accepted syntax is exactly `%Y-%m-%dT%H:%M:%SZ`, after fractional seconds
+and a `+00:00`/`-00:00` offset are normalised away. Anything else parses to
+`null`, including a **non-UTC numeric offset**: `2026-08-21T23:10:00-05:00`
+yields `null`, not a shifted epoch. Reinterpreting someone else's wall clock as
+an instant produces a plausible-looking wrong answer, which in a status bar is
+worse than a visible gap. The parse is total for every input — string, number,
+container or absent — and `checks/laws` states that as `timestamp-total`.
 
 ### `metrics.<name>.unit`
 
@@ -257,9 +276,13 @@ Pass 1 — direct extraction, un-normalised:
 
 ```
 v1(m) = D[path(m)]           if from(m) = path
+      = epoch(D[path(m)])    if from(m) = timestamp
       = expressions[m]       if from(m) = expression
       = undefined            if from(m) = percentOf
 ```
+
+`epoch` is total: `epoch(x) = null` for every `x` that is not an ISO-8601 UTC
+instant, including a non-UTC numeric offset.
 
 Pass 2 — derived:
 
@@ -409,8 +432,8 @@ Note the descending-threshold form for a "credit remaining" style provider:
 
 | Check | Layer | Pins |
 | --- | --- | --- |
-| `core` | pure core semantics | 30 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety |
-| `laws` | universally quantified properties of the core | 524 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, determinism |
+| `core` | pure core semantics | 36 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety, timestamp parsing |
+| `laws` | universally quantified properties of the core | 552 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, timestamp totality, determinism |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
 | `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
 | `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the nine assertions |

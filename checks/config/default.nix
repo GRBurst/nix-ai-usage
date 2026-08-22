@@ -91,6 +91,34 @@
       message = "a null nullText must be stripped rather than emitted as JSON null";
     }
     {
+      name = "claude-exposes-reset-timestamps";
+      condition =
+        actual.providers.claude.metrics.fiveHourResetsAt.from
+        == {timestamp.path = ["five_hour" "resets_at"];}
+        && actual.providers.claude.metrics.sevenDayResetsAt.from
+        == {timestamp.path = ["seven_day" "resets_at"];};
+      message = "the claude defaults must expose both reset timestamps via from.timestamp (D-20)";
+    }
+    {
+      name = "reset-timestamps-are-raw-and-optional";
+      condition =
+        lib.all
+        (m: m.unit == "raw" && m.required == false)
+        [
+          actual.providers.claude.metrics.fiveHourResetsAt
+          actual.providers.claude.metrics.sevenDayResetsAt
+        ];
+      message = "reset timestamps must be raw so they are not clamped, and optional so a null never degrades the document (D-22)";
+    }
+    {
+      name = "reset-timestamps-stay-out-of-the-display";
+      condition =
+        !(lib.hasInfix "ResetsAt" actual.providers.claude.format)
+        && !(lib.hasInfix "ResetsAt" actual.providers.claude.tooltipFormat)
+        && !(lib.any (r: lib.hasSuffix "ResetsAt" r.metric) actual.providers.claude.rules);
+      message = "exposing a timestamp must not change what the bar renders or how severity is computed (D-22)";
+    }
+    {
       name = "provider-name-is-injected";
       condition =
         actual.providers.claude.name

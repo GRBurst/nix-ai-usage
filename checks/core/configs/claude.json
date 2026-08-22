@@ -16,12 +16,30 @@
       "required": true,
       "unit": "percent"
     },
+    "fiveHourResetsAt": {
+      "from": {
+        "timestamp": {
+          "path": ["five_hour", "resets_at"]
+        }
+      },
+      "required": false,
+      "unit": "raw"
+    },
     "sevenDay": {
       "from": {
         "path": ["seven_day", "utilization"]
       },
       "required": true,
       "unit": "percent"
+    },
+    "sevenDayResetsAt": {
+      "from": {
+        "timestamp": {
+          "path": ["seven_day", "resets_at"]
+        }
+      },
+      "required": false,
+      "unit": "raw"
     }
   },
   "name": "claude",

@@ -101,6 +101,30 @@ in {
           required = true;
           nullText = null;
         };
+        # The window reset instants, exposed as epoch seconds so a consumer can
+        # render "resets in 42m" without this repository owning a time format.
+        #
+        # `required = false` is load-bearing: Anthropic returns a null
+        # `resets_at` for a window that has never been used, and a null required
+        # metric degrades the whole document to `unknown`. Exposing more of the
+        # payload must not make the bar go blank on a quiet account (D-22).
+        #
+        # `raw` because these are instants, not quantities: percent would clamp
+        # them to 100 and dollars would prefix a currency symbol. They are also
+        # absent from `format`, `tooltipFormat` and `rules` -- available to an
+        # adapter, invisible by default.
+        fiveHourResetsAt = {
+          from.timestamp.path = ["five_hour" "resets_at"];
+          unit = "raw";
+          required = false;
+          nullText = null;
+        };
+        sevenDayResetsAt = {
+          from.timestamp.path = ["seven_day" "resets_at"];
+          unit = "raw";
+          required = false;
+          nullText = null;
+        };
       };
       rules = [
         {

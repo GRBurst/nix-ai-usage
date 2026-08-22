@@ -55,6 +55,21 @@
         so it may only reference `path` or `expression` metrics.
       '';
     };
+    timestamp = lib.mkOption {
+      type = lib.types.submodule {
+        options.path = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          example = ["five_hour" "resets_at"];
+          description = "Path into the parsed response body.";
+        };
+      };
+      description = ''
+        ISO-8601 UTC timestamp at `path`, parsed to epoch seconds; null when
+        absent or unparsable. A non-UTC numeric offset is deliberately rejected
+        rather than shifted (D-21). Pair with `unit = "raw"`: percent and dollar
+        normalisation would clamp an epoch to 100 or floor it to nothing.
+      '';
+    };
     expression = lib.mkOption {
       type = lib.types.str;
       example = "[.data[].amount] | add";

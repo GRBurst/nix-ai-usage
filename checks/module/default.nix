@@ -10,7 +10,7 @@
 # Assertions in the module system are *data*, not exceptions: `config.assertions`
 # is a list of `{assertion, message}` that a host evaluator later forces. That
 # makes them testable in both directions, which is the capability this layer
-# adds: every assertion gets a violating configuration proving it actually
+# adds: every assertion gets a overlaid configuration proving it actually
 # fires, not merely that its message evaluates.
 #
 # The module is evaluated with `lib.evalModules` against a minimal stub of the
@@ -71,17 +71,39 @@
 
   # `providers` carries a whole-option default, so a definition of any nested
   # path would discard the shipped defaults and leave required sub-options
-  # undefined (an evaluation error, not an assertion failure). Every violating
-  # configuration therefore restates the full registry with one field perturbed.
+  # undefined (an evaluation error, not an assertion failure). Every perturbed
+  # configuration therefore restates the full registry with one field changed.
+  # Most such configurations are violating ones, but not all: `overlaid` is the
+  # neutral mechanism, and the rows say which direction they expect.
   defaults = aiLib.providerDefaults {homeDirectory = "/home/testuser";};
 
-  violating = overlay:
+  overlaid = overlay:
     eval {
       programs.aiUsage.enable = true;
       programs.aiUsage.providers = lib.recursiveUpdate defaults overlay;
     };
 
-  vA1 = violating {
+  # M2 -- `from.timestamp` is a new arm of the extraction union (D-20). Two
+  # properties need proving at this layer: the arm is accepted and reaches
+  # `settings`, and `attrTag` still makes the union exclusive (D-4). The second
+  # is why no assertion rejects a double tag: it is a *type* error, and a type
+  # error is an evaluation failure rather than an assertion, so it is observed
+  # with `tryEval` over a `deepSeq` that forces the whole rendered document.
+  withTimestamp = overlaid {
+    claude.metrics.resetsAt = {
+      from.timestamp.path = ["five_hour" "resets_at"];
+      unit = "raw";
+      required = false;
+    };
+  };
+
+  forces = c: (builtins.tryEval (builtins.deepSeq c.programs.aiUsage.settings true)).success;
+
+  doubleTagged = overlaid {
+    claude.metrics.fiveHour.from.timestamp.path = ["five_hour" "resets_at"];
+  };
+
+  vA1 = overlaid {
     claude.rules = [
       {
         metric = "nope";
@@ -90,7 +112,7 @@
       }
     ];
   };
-  vA2 = violating {
+  vA2 = overlaid {
     claude.rules = [
       {
         metric = "fiveHour";
@@ -99,22 +121,22 @@
       }
     ];
   };
-  vA3 = violating {openrouter.metrics.percent.from.percentOf.total = "nope";};
-  vA4 = violating {
+  vA3 = overlaid {openrouter.metrics.percent.from.percentOf.total = "nope";};
+  vA4 = overlaid {
     claude.metrics.bad_name = {
       from.path = ["five_hour" "utilization"];
       unit = "raw";
       required = false;
     };
   };
-  vA5 = violating {claude.format = "{fiveHour}<b>";};
-  vA6 = violating {claude.format = "{nosuch}";};
-  vA7 = violating {
+  vA5 = overlaid {claude.format = "{fiveHour}<b>";};
+  vA6 = overlaid {claude.format = "{nosuch}";};
+  vA7 = overlaid {
     claude.enable = false;
     openrouter.enable = false;
   };
-  vA8 = violating {claude.maxStaleAge = 1;};
-  vA9 = violating {claude.credential = null;};
+  vA8 = overlaid {claude.maxStaleAge = 1;};
+  vA9 = overlaid {claude.credential = null;};
 
   rows = [
     # ---- positive: the shipped defaults satisfy every assertion ----
@@ -154,7 +176,7 @@
       name = "settings-drops-disabled";
       condition =
         !(
-          (violating {openrouter.enable = false;})
+          (overlaid {openrouter.enable = false;})
           .programs
           .aiUsage
           .settings
@@ -182,7 +204,27 @@
       message = "the claude credential path must be derived from home.homeDirectory";
     }
 
-    # ---- negative: each assertion fires on a violating configuration ----
+    # ---- the extraction union: `timestamp` accepted, exclusivity preserved ----
+    {
+      name = "timestamp-arm-accepted";
+      condition =
+        forces withTimestamp
+        && withTimestamp.programs.aiUsage.settings.providers.claude.metrics.resetsAt.from
+        == {timestamp.path = ["five_hour" "resets_at"];};
+      message = "from.timestamp must be an accepted extraction kind and render into settings";
+    }
+    {
+      name = "timestamp-holds-no-assertion";
+      condition = failures withTimestamp == [];
+      message = "a timestamp metric absent from every rule and template must violate no assertion";
+    }
+    {
+      name = "extraction-union-stays-exclusive";
+      condition = !(forces doubleTagged);
+      message = "a metric carrying both path and timestamp must be a type error, not a rendered config";
+    }
+
+    # ---- negative: each assertion fires on a overlaid configuration ----
     {
       name = "A1-rule-references-unknown-metric";
       condition = firesWith vA1 "rule references unknown metric 'nope'";

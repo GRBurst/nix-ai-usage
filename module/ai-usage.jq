@@ -19,6 +19,23 @@ def pangoSafe: tostring | gsub("[<>&]"; "");
 def at($doc; $path):
   if $doc == null then null else (try ($doc | getpath($path)) catch null) end;
 
+# ISO-8601 UTC -> epoch seconds. Total: any input yields number|null, never
+# raises. jq's `fromdateiso8601` accepts exactly "%Y-%m-%dT%H:%M:%SZ" -- no
+# fractional seconds and no numeric offset -- so both are normalised away first.
+# A non-UTC offset is rejected rather than shifted: silently reinterpreting
+# someone else's wall clock as an instant is the kind of wrong answer that looks
+# right in a status bar. The `test` guard states the accepted shape explicitly
+# and the `try` makes totality hold even if guard and parser ever disagree.
+def epoch:
+  if type != "string" then null
+  else
+    (sub("\\.[0-9]+(?=([Z+-]|$))"; "") | sub("[+-]00:00$"; "Z"))
+    | if test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+      then (try fromdateiso8601 catch null)
+      else null
+      end
+  end;
+
 def unitOf($m): $m.unit // "raw";
 
 def norm($unit):
@@ -29,12 +46,15 @@ def norm($unit):
 
 def entries: ($provider.metrics // {}) | to_entries;
 
-# Pass 1 -- `path` and `expression` metrics, raw (un-normalised) values.
+# Pass 1 -- `path`, `timestamp` and `expression` metrics, raw (un-normalised)
+# values. `timestamp` needs no `asnum`: `epoch` already returns number or null.
 def pass1($doc):
   reduce (entries | .[]) as $e ({};
     . + {($e.key):
       (if ($e.value.from | has("path"))
        then (at($doc; $e.value.from.path) | asnum)
+       elif ($e.value.from | has("timestamp"))
+       then (at($doc; $e.value.from.timestamp.path) | epoch)
        elif ($e.value.from | has("expression"))
        then ($expressions[$e.key] | asnum)
        else null
