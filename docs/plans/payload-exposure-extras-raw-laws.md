@@ -956,3 +956,60 @@ OpenRouter capture caveat for M3: in `openrouter_payload.json`, `limit - limit_r
 is **invisible in this capture**. The defect is general - all-time `usage` over a windowed
 `limit` - so the new fixture must use values where the two genuinely differ, or the check
 proves nothing.
+
+### M1 - harness plus D2, complete
+
+Landed: `checks/laws/{default.nix,laws.jq,run-instance.sh}`, one line in `flake.nix`, and
+the D2 fix in `module/ai-usage.jq` (`show` pipes every rendered value through `pangoSafe`).
+The production delta for the whole milestone is 10 insertions and 3 deletions in one jq
+def.
+
+Sequence actually followed, and what each step proved:
+
+| Step | Result |
+| ---- | ------ |
+| M1.1 | 240 instances, 0 violations. Harness green while restating only what `assert_case` already guaranteed. |
+| M1.2 | Family C added -> exactly 18 violations, 9 `pango-text` + 9 `pango-tooltip`, confined to the 9 markup-bearing `nullText` instances. Nothing else fired, so the harness was not vacuously green. |
+| M1.3 | `show` escapes by construction. Syntax gate passes. |
+| M1.4 | `nix flake check --keep-going`: all five checks pass. The ~30 `checks/core` rows are untouched and unchanged. |
+| M1.5 | 524 instances, 542 core runs, 0 violations. |
+
+Harness facts a fresh session needs:
+
+- `lib.cartesianProductOfSets` does **not** exist in this nixpkgs. Use `lib.cartesianProduct`.
+- `.metrics` in the document holds **normalised numbers or null**, not rendered strings.
+  That is what makes the idempotence pair work: `run-instance.sh` feeds `doc.metrics.x`
+  back as the second body.
+- `pangoSafe` **strips** `<`, `>` and `&`; it does not entity-escape. `nullText =
+  "<b>x</b>"` renders as `bx/b`. Intentional - the invariant is "these bytes never reach a
+  bar", not "markup round-trips".
+- Only the three `meta` shapes `module/package.nix` can actually emit are generated
+  (fresh, stale, dead). Generating `stale` with a null `error` would fail `error-iff`
+  against a document that cannot occur, which would be a harness bug, not a core bug.
+- In Oniguruma a negated character class matches newline and `^`/`$` are line anchors, so
+  the pango laws use `test("[<>&]") | not` rather than an anchored `^[^<>&]*$`.
+- Pair ids must be injective. The first version of `pairMonotone` keyed on
+  `directionOf threshold`, so ascending {80,90} and atEdges {0,100} collided into groups of
+  four. The `pair-cardinality` law caught it; ids now carry `warnAt`/`criticalAt`.
+
+Mutation testing, to prove the laws have teeth. Nine mutations to `module/ai-usage.jq`,
+nine killed, each by the law that owns the property:
+
+| Mutation | Killed by (violation count) |
+| -------- | --------------------------- |
+| drop the `floor` from `norm` | norm-domain (68), metrics-expected (2) |
+| `>=` -> `>` in `sev` | severity-expected (12) |
+| floor the operands before the ratio in `pass2` | metrics-expected (1) |
+| `max_by(rank)` -> `.[0]` | rule-permutation (6) |
+| `isRequired` always true | unknown-iff (36) |
+| percent normalisation halves the value | norm-idempotent (3), metrics-expected (5), severity-expected (9) |
+| `max_by(rank)` -> `min_by(rank)` | rule-inclusion (3) |
+| invert direction inference, `<` -> `>` | severity-monotone (6), severity-expected (33) |
+| `age: $meta.age` -> `age: now` | determinism (9), rule-permutation (9) |
+
+The last row is the one worth keeping in mind: `determinism` is the mechanical guard
+against reintroducing a clock into the core, and it demonstrably works.
+
+Two laws survived every mutation attempted, `norm-monotone` and `pct-max`. They are guards
+for future changes rather than current regressions; that is not a reason to drop them, but
+they are unproven.

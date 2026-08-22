@@ -171,13 +171,22 @@ block error, so a failed read must still be a valid document.
 | `age` | number or null | seconds since the last good response |
 | `error` | string or null | non-null iff `severity == "unknown"` or `stale` |
 
-Invariants, asserted by `checks/core`:
+Invariants, asserted by `checks/core` at named points and by `checks/laws` over a
+generated domain:
 
-- `severity == "unknown"` implies `text == "?"`, `metrics == {}`,
-  `percentage == null` and `error != null`.
+- `severity == "unknown"` **if and only if** the body is unparsable or some
+  required metric resolved to null, and `unknown` implies `text == "?"`,
+  `metrics == {}`, `percentage == null` and `error != null`.
 - `text` and `tooltip` never contain `<`, `>` or `&`. Bars that render pango
   markup commonly do not escape it (i3status-rust's `pango-str` formatter, for
   one, does not), so those characters would reach pango raw and corrupt the block.
+  Stripping happens in the core's `show`, applied to every rendered value —
+  including `nullText`, which is user-supplied and therefore untrusted. This is
+  deliberately *not* a module assertion: the core must be safe for any config,
+  including hand-written ones and the standalone use of `ai-usage.jq`, and
+  validation at the module layer would not protect those.
+- `text` and `tooltip` contain no residual `{token}`.
+- Identical inputs produce byte-identical output. The core reads no clock.
 
 A missing **required** metric makes the whole document `unknown`. That is
 deliberate: a mistyped path should fail loudly rather than render empty text that
@@ -396,11 +405,12 @@ Note the descending-threshold form for a "credit remaining" style provider:
 
 ## Checks
 
-`nix flake check --keep-going` runs four layers, each with exactly one owner:
+`nix flake check --keep-going` runs five layers, each with exactly one owner:
 
 | Check | Layer | Pins |
 | --- | --- | --- |
 | `core` | pure core semantics | 30 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety |
+| `laws` | universally quantified properties of the core | 524 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, determinism |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
 | `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
 | `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the nine assertions |
@@ -425,6 +435,48 @@ Assertions are testable in both directions here because in the module system the
 are *data* — a list of `{assertion, message}` that a host evaluator forces later —
 not exceptions. Forcing the messages only proves they evaluate; `checks/module`
 proves each one actually fires.
+
+### Laws
+
+`checks/laws` **supplements** `checks/core`, it does not replace it. An example
+row pins *intent* at a named point — `percentOf(16, 20) == 80`, and why — and is
+readable documentation. A law pins *structure* over a whole domain:
+`norm . norm = norm`, or "adding a rule can only raise severity". A green law
+suite with no examples is unreadable to the next maintainer, so no example row is
+ever deleted because a law subsumes it.
+
+The suite is generated in Nix — `lib.cartesianProduct` over small,
+boundary-dense domains — and verified in jq. There is no property-testing
+framework and no randomness: the same instances run on every build, so a failure
+is always reproducible from the reported instance. The verifier returns *every*
+violation rather than the first, because a harness that reports one
+counterexample is a worse debugger than an example suite.
+
+Laws needing two runs of the core — determinism, rule-order permutation,
+rule-set inclusion, value monotonicity, normalisation idempotence — are
+expressed as *paired* instances sharing a `pairId`, which the verifier groups.
+This is what lets `f(f(x)) = f(x)` be stated without splitting the core into a
+jq module and testing something other than the artefact that ships. The core is
+driven exactly as `module/package.nix` drives it, through `--argjson provider`,
+`--rawfile body`, `--argjson expressions` and `--argjson meta`.
+
+Two laws are load-bearing beyond their own statement. **Determinism** —
+identical inputs yield byte-identical stdout — mechanically enforces the purity
+row of the table above; it is the permanent guard against reintroducing `now`
+into the core. **`unknown` if and only if the body is unparsable or a required
+metric is null** closes the reverse direction that `checks/core` leaves open,
+which is what catches a new optional metric accidentally degrading a whole
+provider.
+
+Since jq has no typechecker, the totality laws *are* the type system: the core's
+contract is `(provider, body, expressions, meta) -> Document`, total, and only a
+law can state that.
+
+The ceiling is worth stating plainly: exhaustive laws over a small adversarial
+domain are **bounded verification, not proof**. jq is not verifiable. The
+escalation path is the typed-core port listed under extension points, at which
+point `proptest` and `kani` bounded model checking apply — and this fixture and
+law suite transfers unchanged.
 
 ## Manual validation
 

@@ -14,7 +14,7 @@ Prefer flake commands with explicit `path:` references from this checkout:
 
 - `nix flake show path:$HOME/projects/nix/ai-usage --no-write-lock-file`
 - `nix flake check path:$HOME/projects/nix/ai-usage --no-write-lock-file --keep-going`
-- `nix build path:$HOME/projects/nix/ai-usage#checks.x86_64-linux.core --no-write-lock-file` (likewise `config`, `runtime`, `module`)
+- `nix build path:$HOME/projects/nix/ai-usage#checks.x86_64-linux.core --no-write-lock-file` (likewise `laws`, `config`, `runtime`, `module`)
 - `nix fmt path:$HOME/projects/nix/ai-usage`
 
 Pass `--keep-going` to `nix flake check`. Without it the first failing check aborts the run and masks the rest, which makes a multi-check regression look like a single failure. Build a single check by name when iterating on one layer.
@@ -82,6 +82,7 @@ This flake's own `nixpkgs` serves only its checks and formatter. The module buil
 `module/package.nix`: the `ai-usage` derivation — imperative shell orchestrator (argument parsing, credential resolution, HTTP fetch, `flock`ed cache, expression pre-evaluation). Receives the config as a `configFile` path.
 `module/ai-usage.jq`: the pure functional core — response body plus config to the bar-agnostic document. ~120 lines.
 `checks/core/`: pure core semantics over `module/ai-usage.jq`, driven by hand-written `configs/*.json` and recorded `fixtures/*.json`.
+`checks/laws/`: universally quantified properties of the same core, over instances generated in Nix (`default.nix`), executed one-per-instance by `run-instance.sh`, and verified in pure jq (`laws.jq`). Bounded-exhaustive, no randomness, reports every violation.
 `checks/config/`: golden test pinning `mkConfig` output against `expected.json`, plus drift detection against `checks/core/configs`.
 `checks/runtime/`: orchestrator behaviour against stub `curl`/`secret-tool` — caching, staleness, throttling, credentials, exit codes, concurrency.
 `checks/module/`: option shape, `settings` contents, package installation, and a violating configuration for each of the nine assertions.
@@ -110,6 +111,7 @@ Each layer owns exactly one thing. Put a test where its owner lives; do not dupl
 | Check     | Owns                                               | Add a case here when changing                                                                                              |
 | --------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `core`    | pure jq semantics                                  | extraction, units, clamping/flooring, severity, templates, `percentage`, metric order, pango safety, staleness rendering   |
+| `laws`    | universally quantified properties of the same core | any new invariant that should hold for *all* inputs rather than at a named point: totality, ranges, monotonicity, algebraic identities, determinism |
 | `config`  | the shipped defaults and the rendered config shape | provider defaults, null stripping, key omission, disabled-provider filtering                                               |
 | `runtime` | the orchestrator                                   | cache, refresh/retry intervals, stale serving, credential kinds, `command` sources, exit codes, atomic writes, concurrency |
 | `module`  | the Home Manager module                            | option types, `settings`, package installation, assertion firing                                                           |

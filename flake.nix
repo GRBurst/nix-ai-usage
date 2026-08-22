@@ -21,6 +21,7 @@
       pkgs = pkgsFor system;
     in {
       core = pkgs.callPackage ./checks/core {};
+      laws = pkgs.callPackage ./checks/laws {};
       config = pkgs.callPackage ./checks/config {};
       runtime = pkgs.callPackage ./checks/runtime {};
       module = pkgs.callPackage ./checks/module {};

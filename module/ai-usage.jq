@@ -82,10 +82,17 @@ def sev($v; $r):
 
 # The `$` sigil belongs to the renderer, so an unlimited limit renders `∞`
 # rather than `$∞`.
+#
+# Every rendered value passes through `pangoSafe`, so pango safety holds by
+# construction for any config -- including a hand-written one, or one reaching
+# this file after the standalone-flake extraction. `nullText` is free-form in the
+# schema and the module validates only the templates, so a module-level
+# assertion would not protect the core.
 def show($m; $v):
-  if $v == null then ($m.nullText // "")
-  elif unitOf($m) == "dollars" then ("$" + ($v | tostring))
-  else ($v | tostring) end;
+  (if $v == null then ($m.nullText // "")
+   elif unitOf($m) == "dollars" then ("$" + ($v | tostring))
+   else ($v | tostring) end)
+  | pangoSafe;
 
 def render($tpl; $vals):
   reduce (entries | .[]) as $e ($tpl // "";

@@ -139,14 +139,16 @@ to run against a scratch config without a rebuild.
 ## Development
 
 ```sh
-nix flake check --keep-going   # core, config, runtime, module
+nix flake check --keep-going   # core, laws, config, runtime, module
 nix fmt
 ```
 
-Four test layers, each owning exactly one thing: `core` (pure jq semantics over
-JSON fixtures), `config` (golden file pinning the shipped provider defaults),
-`runtime` (the orchestrator against stub `curl`/`secret-tool`), and `module` (the
-Home Manager options, plus a violating configuration for every assertion).
+Five test layers, each owning exactly one thing: `core` (pure jq semantics at
+named points, over JSON fixtures), `laws` (the same core, but universally
+quantified properties over a generated adversarial domain), `config` (golden file
+pinning the shipped provider defaults), `runtime` (the orchestrator against stub
+`curl`/`secret-tool`), and `module` (the Home Manager options, plus a violating
+configuration for every assertion).
 
 See [`docs/architecture.md`](docs/architecture.md) for the config, document and
 cache schemas, the three-pass resolution semantics, the provider reference, and

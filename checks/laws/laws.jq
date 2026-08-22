@@ -1,0 +1,185 @@
+# Stage 3 of the law harness: a pure verifier over the whole result set.
+#
+# Input:  the slurped array of {instance, raw, status, doc} records.
+# Output: an array of violations. Empty means every law held.
+#
+# Every violation is reported, never just the first: a law suite whose output is
+# a single counterexample is a worse debugger than an example suite. Each record
+# carries the full instance, so a failure is reproducible by hand.
+
+def law($name; $r; $ok; $detail):
+  if $ok then empty
+  else {law: $name, instance: $r.instance, doc: $r.doc, detail: $detail}
+  end;
+
+def law($name; $r; $ok): law($name; $r; $ok; null);
+
+def schemaKeys:
+  ["version", "provider", "severity", "text", "tooltip",
+   "percentage", "metrics", "stale", "age", "error"];
+
+def rank: {"ok": 0, "warn": 1, "critical": 2, "unknown": 3}[.];
+
+# Anchored classes are avoided: in Oniguruma a negated class matches a newline
+# and `^`/`$` are line anchors, so `test("^[^<>&]*$")` would pass a document
+# whose second line carries markup. Test for the forbidden characters instead.
+def hasMarkup: test("[<>&]");
+def hasToken: test("\\{[a-zA-Z]");
+
+def unitOf($r; $name): ($r.instance.provider.metrics[$name].unit) // "raw";
+
+# The percent-unit metrics named by rules, which is what `percentage` maximises.
+def rulePercents($r):
+  [$r.instance.provider.rules[]?
+   | select(unitOf($r; .metric) == "percent")
+   | $r.doc.metrics[.metric]
+   | select(. != null)];
+
+# ---------------------------------------------------------------- unary laws
+
+# The document schema, restated independently of checks/core's assert_case.
+def shape($r):
+    law("json-shape"; $r;
+        ($r.doc | keys_unsorted | sort) == (schemaKeys | sort);
+        {keys: ($r.doc | keys_unsorted)})
+  , law("version-1"; $r; $r.doc.version == 1; {version: $r.doc.version})
+  , law("pango-text"; $r; ($r.doc.text | hasMarkup | not); {text: $r.doc.text})
+  , law("pango-tooltip"; $r;
+        ($r.doc.tooltip | hasMarkup | not); {tooltip: $r.doc.tooltip})
+  , law("render-total"; $r;
+        (($r.doc.text + $r.doc.tooltip) | hasToken | not);
+        {text: $r.doc.text, tooltip: $r.doc.tooltip})
+
+  # `unknown` is the degraded document the bar contract requires.
+  , law("unknown-shape"; $r;
+        $r.doc.severity != "unknown"
+        or ($r.doc.text == "?" and $r.doc.metrics == {}
+            and $r.doc.percentage == null and $r.doc.error != null);
+        {severity: $r.doc.severity, text: $r.doc.text,
+         metrics: $r.doc.metrics, percentage: $r.doc.percentage,
+         error: $r.doc.error})
+
+  # The reverse direction the example suite never checked: a document must not
+  # degrade for any reason other than an unparsable body or a null required
+  # metric. This is what catches an accidentally-required new metric.
+  , law("unknown-iff"; $r;
+        ($r.doc.severity == "unknown") == $r.instance.expect.degenerate;
+        {severity: $r.doc.severity, degenerate: $r.instance.expect.degenerate})
+
+  , law("error-iff"; $r;
+        ($r.doc.error != null)
+        == ($r.doc.severity == "unknown" or $r.doc.stale);
+        {error: $r.doc.error, severity: $r.doc.severity, stale: $r.doc.stale})
+  ;
+
+# `unit` defines the domain of the normalised value, so every reported metric
+# must already sit inside it -- which is also idempotence stated pointwise.
+def normalisation($r):
+    ( $r.doc.metrics
+      | to_entries[]
+      | . as $m
+      | law("norm-domain"; $r;
+            $m.value == null
+            or unitOf($r; $m.key) == "raw"
+            or (($m.value | floor) == $m.value
+                and $m.value >= 0
+                and (unitOf($r; $m.key) != "percent" or $m.value <= 100));
+            {metric: $m.key, unit: unitOf($r; $m.key), value: $m.value}) )
+  , law("pct-range"; $r;
+        $r.doc.percentage == null
+        or ($r.doc.percentage >= 0 and $r.doc.percentage <= 100);
+        {percentage: $r.doc.percentage})
+  , (rulePercents($r) as $p
+     | law("pct-max"; $r;
+           $r.doc.severity == "unknown"
+           or (if ($p | length) == 0
+               then $r.doc.percentage == null
+               else $r.doc.percentage == ($p | max) end);
+           {percentage: $r.doc.percentage, candidates: $p}))
+  ;
+
+# Pinned expectations, present only on the instances that carry them. These are
+# the named points that make a generated suite readable.
+def pinned($r):
+    law("severity-expected"; $r;
+        $r.instance.expect.severity == null
+        or $r.doc.severity == $r.instance.expect.severity;
+        {expected: $r.instance.expect.severity, actual: $r.doc.severity})
+  , law("metrics-expected"; $r;
+        $r.instance.expect.metrics == null
+        or ($r.instance.expect.metrics
+            | to_entries
+            | all(.value == $r.doc.metrics[.key]));
+        {expected: $r.instance.expect.metrics, actual: $r.doc.metrics})
+  ;
+
+def unary($r):
+    law("core-exit-0"; $r; $r.status == 0; {status: $r.status, raw: $r.raw})
+  , law("core-json"; $r; ($r.doc | type) == "object"; {raw: $r.raw})
+  , (if ($r.doc | type) == "object"
+     then shape($r), normalisation($r), pinned($r)
+     else empty end)
+  ;
+
+# --------------------------------------------------------------- paired laws
+
+def pairDetail($a; $b):
+  {a: {name: $a.instance.name, doc: $a.doc},
+   b: {name: $b.instance.name, doc: $b.doc}};
+
+def relation($a; $b):
+  ($a.instance.expect.pair) as $rel
+  | if $rel == "determinism"
+    then law("determinism"; $a; $a.raw == $b.raw; {a: $a.raw, b: $b.raw})
+
+    # `max_by(rank)` is commutative, so rule order cannot reach the document.
+    elif $rel == "rule-permutation"
+    then law("rule-permutation"; $a; $a.doc == $b.doc; pairDetail($a; $b))
+
+    # A superset of rules can only raise severity, never lower it.
+    elif $rel == "rule-inclusion"
+    then law("rule-inclusion"; $a;
+             ($a.doc.severity | rank) <= ($b.doc.severity | rank);
+             pairDetail($a; $b))
+
+    # Proves that threshold direction is inferred from rule ordering: the same
+    # value pair must move severity opposite ways under opposite orderings.
+    elif $rel == "value-monotone"
+    then ( law("severity-monotone"; $a;
+               (if $a.instance.expect.direction == "ascending"
+                then ($a.doc.severity | rank) <= ($b.doc.severity | rank)
+                else ($a.doc.severity | rank) >= ($b.doc.severity | rank)
+                end);
+               pairDetail($a; $b) + {direction: $a.instance.expect.direction})
+         , law("norm-monotone"; $a;
+               ($a.doc.metrics.x == null or $b.doc.metrics.x == null
+                or $a.doc.metrics.x <= $b.doc.metrics.x);
+               pairDetail($a; $b)) )
+
+    # norm . norm = norm, by feeding the reported value back as the body.
+    elif $rel == "norm-idempotent"
+    then ( $a.instance.expect.metric as $m
+         | law("norm-idempotent"; $a;
+               $a.doc.metrics[$m] == $b.doc.metrics[$m]
+               and $a.doc.text == $b.doc.text;
+               pairDetail($a; $b) + {metric: $m}) )
+
+    else law("unknown-relation"; $a; false; {relation: $rel})
+    end;
+
+def binary($g):
+  ($g | sort_by(.instance.pairIndex)) as $s
+  | if ($s | length) != 2
+    then law("pair-cardinality"; $s[0]; false;
+             {size: ($s | length), pairId: $s[0].instance.pairId})
+    elif (($s[0].doc | type) != "object") or (($s[1].doc | type) != "object")
+    then empty # already reported by core-json
+    else relation($s[0]; $s[1])
+    end;
+
+. as $results
+| [$results[] | unary(.)]
++ ([$results[] | select(.instance.pairId != null)]
+   | group_by(.instance.pairId)
+   | map(binary(.))
+   | flatten)
