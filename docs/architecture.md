@@ -191,7 +191,8 @@ assertion.
 
 `ai-usage <provider>` prints exactly one JSON object on stdout and always
 exits `0` — bars typically treat a non-zero exit or unparsable output as a hard
-block error, so a failed read must still be a valid document.
+block error, so a failed read must still be a valid document. (`--raw` is a
+different mode with a different contract; see the CLI section.)
 
 ```json
 {
@@ -279,13 +280,13 @@ lowering the bar interval costs nothing but cache reads.
 ## CLI
 
 ```
-ai-usage <provider> [--refresh] [--config <path>]
+ai-usage <provider> [--refresh] [--raw] [--config <path>]
 ```
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | a document was printed (possibly `unknown`) |
-| `1` | the config file is missing or is not version 1 |
+| `0` | document mode: a document was printed (possibly `unknown`) — always. `--raw`: a body was written to stdout |
+| `1` | the config file is missing or is not version 1; under `--raw`, also "no body was available to write" |
 | `2` | usage error: no provider, unknown provider, disabled provider, extra argument, unknown flag |
 
 `AI_USAGE_CONFIG` overrides the built-in config path; `--config` overrides both.
@@ -295,6 +296,41 @@ a rebuild.
 `--refresh` is the only way to force a network call. It is deliberately **not**
 bound to a bar click: in i3status-rust, for instance, an explicit click handler
 *replaces* the default left-button behaviour, which is format cycling.
+
+### `--raw`
+
+`--raw` prints the upstream response body instead of the document. It exists so a
+fixture can be minted without reconstructing the request and its credential by
+hand:
+
+```sh
+ai-usage claude --raw > checks/core/fixtures/my-capture.json
+```
+
+The branch sits *after* cache, lock and staleness resolution and *before*
+expression pre-evaluation, so there is exactly one refresh policy in the program:
+`--refresh`, retry throttling and stale serving all behave identically in both
+modes rather than being reimplemented for one of them. A stale body is still a
+body — it is printed with exit `0` and the fetch error goes to stderr, because
+`stale` and `age` are document-mode concepts and stdout is reserved for the
+payload. Output is byte-exact apart from trailing whitespace, which is normalised
+to a single newline; every consumer of a fixture reads it with `--rawfile` plus
+`fromjson`, which tolerate that.
+
+**The exit-code asymmetry with document mode is deliberate** (D-26). Document
+mode implements the status-bar protocol: waybar, i3blocks and polybar treat a
+non-zero child as a broken module, which is why a failed read is expressed *in
+the payload* as `severity: "unknown"` and never as an exit code. `--raw` is an
+ordinary Unix filter and obeys ordinary Unix rules, so it **exits `0` if and only
+if it wrote a body**: `ai-usage claude --raw > fixture.json` must not leave an
+empty file behind and report success. Two modes, two contracts, each following
+its own established convention.
+
+`checks/runtime` states the biconditional as a law over every recorded `--raw`
+invocation, not just per scenario. Note its limit, found by mutation: the law sees
+*protocol* violations, not *correctness* ones. Reading `.body` straight from the
+cache file — bypassing `maxStaleAge` — still exits `0` with a non-empty stdout and
+is legal under the law; only the value pins catch it.
 
 ## Semantics
 
@@ -527,7 +563,7 @@ Note the descending-threshold form for a "credit remaining" style provider:
 | `core` | pure core semantics | 46 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, truncation and opting out of it, staleness, `percentage`, metric order, pango safety, timestamp parsing, window-scoped ratios |
 | `laws` | universally quantified properties of the core | 795 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation and its per-metric opt-out, the severity lattice, timestamp totality, determinism, extras non-interference over every subset |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
-| `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
+| `runtime` | orchestrator | 58 assertions with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency, and `--raw` over the fresh, throttled, forced-refresh, cold-failure, stale and expired states plus its exit biconditional |
 | `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions |
 
 The golden file `checks/config/expected.json` is the single place the shipped
@@ -628,6 +664,87 @@ The Anthropic utilisation endpoint is **undocumented** and may change or
 disappear without notice. When it does the Claude block degrades to `?` and
 `Warning` instead of breaking the bar, and
 `providers.claude.source.http.url` is the override point.
+
+## Decision register
+
+Code comments in this repository cite design decisions as `D-n`. This table is
+that register. It was written **retroactively**, so read it accordingly: `D-20`
+onward are recorded from their own written rationale, while `D-3` through `D-19`
+are *reconstructed from their citation sites*, which is the best that can be done
+for a decision whose only surviving record is a comment referring to it.
+
+Two consequences of the retroactive reconstruction, stated rather than hidden:
+
+- `D-1`, `D-2`, `D-7`, `D-8`, `D-9`, `D-12`, `D-14`, `D-15`, `D-16` and `D-18`
+  are cited nowhere in the tree. Their meanings are unrecoverable. Do not reuse
+  those numbers; a decision nobody can look up is worse than an unnumbered one.
+- `D-3` is cited at two sites with two different meanings — "adding a provider is
+  data rather than code" in `module/default.nix`, and "evaluate the module against
+  a Home Manager stub rather than taking a `home-manager` input" in
+  `checks/module`. Both are real decisions; which one owns the number cannot be
+  settled now, so both are listed. This collision is the reason the register
+  exists.
+
+Entries are deliberately one line each and point at the section that explains
+them. The explanation has one owner; this table is an index, not a second copy.
+
+| `D-n` | Decision | Explained under |
+| --- | --- | --- |
+| `D-3` | Providers are data, not code: the built-in `claude` and `openrouter` are ordinary members of `providers`, not special cases | Module option reference |
+| `D-3` | *(second citation)* `checks/module` evaluates the module against a ~20-line Home Manager stub rather than taking a `home-manager` input, keeping this flake at one input | Checks |
+| `D-4` | `source`, `credential` and `metrics.<name>.from` are `types.attrTag`, so "which kind is this?" has exactly one answer instead of an undocumented precedence | Config schema |
+| `D-5` | `from.expression` is pre-evaluated by the orchestrator and handed to the core as a *value*, because jq has no `eval` and a malformed filter must not corrupt the document | `metrics.<name>.from` |
+| `D-6` | Both `percentOf` operands must be pass-1 metrics, which is what makes the two-pass resolution terminating | Semantics, assertion 3 |
+| `D-10` | The alarm direction is inferred from the ordering of `warnAt` and `criticalAt` rather than declared by a separate field | `rules` |
+| `D-11` | A null **required** metric makes the whole document `unknown`; `percentOf` metrics are never required, so a required `percentOf` is unrepresentable | Document schema |
+| `D-13` | The cache stores the raw body, not the rendered document, so `refreshInterval` is independent of a bar's poll interval and re-rendering costs no network call | Cache schema |
+| `D-17` | A disabled provider is **absent** from the rendered config rather than present with `enable = false`, so querying one is a usage error | Config schema |
+| `D-19` | `checks/runtime` drives a hand-written config rather than `lib/`'s output, so the orchestrator stays testable without evaluating the module tree | Checks |
+| `D-20` | `from.timestamp` emits **epoch seconds** with `unit = "raw"`, absolute rather than remaining-seconds: a remaining value is computed at fetch time and is therefore wrong by up to `maxStaleAge` whenever the document is served from cache. Rejected: injecting `$meta.now` (breaks purity and determinism), and a `duration` unit with formatting (presentation is out of scope) | `metrics.<name>.from` |
+| `D-21` | A non-UTC numeric offset parses to `null`, not to a shifted epoch: a silent hour-shift is strictly worse than a visible gap | `metrics.<name>.from` |
+| `D-22` | `resetsAt` metrics are `required = false` and absent from `format`, because Anthropic returns `null` for an unused window and a null required metric would render the whole block `?` | `providers.<name>`, D-11 |
+| `D-23` | OpenRouter's window ratio is `percentOf(limit - limit_remaining, limit)`. `limit_remaining` is already window-scoped server-side, so this needs no knowledge of the `limit_reset` enum and cannot break on an unseen value | Worked example — HTTP provider |
+| `D-24` | Extras are opt-in per group (`extras.<name>.enable`) and may add **metrics only** — no rules, no template tokens. That restriction is what makes non-interference provable rather than merely likely | `providers.<name>` |
+| `D-25` | No API-supplied severity: thresholds remain the single severity engine | Deliberately unused payload fields |
+| `D-26` | `--raw` exits `0` if and only if it wrote a body, deliberately breaking document mode's always-`0` contract | CLI, `--raw` |
+| `D-27` | Laws are bounded-exhaustive and generated in Nix: no property-testing framework and no randomness, so every counterexample is reproducible and minimal by construction | Laws |
+| `D-28` | Laws drive the core through its real CLI argument interface rather than splitting `ai-usage.jq` into a jq module, so the artefact under test is the artefact that ships | Laws |
+
+The next decision to be recorded is `D-29`.
+
+## Deliberately unused payload fields
+
+Both shipped endpoints return substantially more than this repository reads. The
+omissions are decisions, so they are written down: without this register the next
+maintainer re-derives each one from the payload, and "the API offers a severity,
+why are we computing our own?" is a question that deserves an answer in the
+repository rather than in a review comment.
+
+Field names below were verified against real captures. The captures themselves
+are untracked scratch (`claude_payload.json`, `openrouter_payload.json`) because
+they carry account identifiers and balances; only the *shape* is recorded here.
+
+### Anthropic (`/api/oauth/usage`)
+
+| Field | Why it is not read |
+| --- | --- |
+| `limits[].severity`, `spend.severity` | **D-25.** The API grades its own numbers, but the observed values are only `normal` and `critical` — the middle token is *unobserved*, and guessing it wrong maps silently onto `ok`. Thresholds stay the single severity engine, and `rules` is untouched. Permission to break the `rules` schema for this was granted and declined: YAGNI. |
+| `limits[]` (`kind`, `group`, `percent`, `resets_at`, `is_active`, `scope`) | A positional array carrying the same utilisation numbers as `five_hour` and `seven_day`, keyed by index. A path into `limits[1]` is a bet on array order that the named keys do not require. `scope` is null for the unscoped entries. |
+| `extra_usage.*` | Superseded by `spend`, which encodes the same quantity better: `{amount_minor, currency, exponent}` against `used_credits` plus `decimal_places`. In the capture `extra_usage.utilization` is `null` while `spend.percent` is a number, so the preferred encoding is also the populated one. The `claude.extras.spend` extra reads `spend` and converts minor units inside the extra, so `unit = "dollars"` stays honest. |
+| `nimbus_quill`, `tangelo`, `iguana_necktie`, `omelette_promotional`, `cinder_cove`, `amber_ladder`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_cowork`, `seven_day_omelette`, `seven_day_oauth_apps` | Codenamed cohort keys. Every one is `null` in the capture except `nimbus_quill.utilization`, whose sibling `resets_at` is null. An undocumented endpoint's internal codenames are not stable API surface; a metric pointed at one would degrade to `?` the day the cohort is renamed, which is exactly what `required = false` exists to avoid — but there is no reason to carry the metric in the first place. |
+| `five_hour.*_dollars`, `seven_day.*_dollars`, `nimbus_quill.*_dollars` | `limit_dollars`, `used_dollars` and `remaining_dollars` are `null` on this account. A dollars view of the subscription windows may appear later; it would be an extra, not a default. |
+| `spend.cap` | `spend.cap.money` is byte-for-byte the same money object as `spend.limit`, which the `spend` extra already reads; `spend.cap.credits` is null. Two paths to one number, so the extra picks the one whose sibling `used` shares its encoding. |
+| `member_dashboard_available`, `spend.disclaimer`, `spend.enabled`, `spend.balance`, `spend.auto_reload`, `extra_usage.is_enabled` | Feature flags, prose and account settings rather than usage. A status bar has no use for them, and `balance` and `auto_reload` are null here anyway. |
+
+### OpenRouter (`/api/v1/key`)
+
+| Field | Why it is not read |
+| --- | --- |
+| `data.rate_limit` | Self-declared deprecated by the provider: the object carries `note: "This field is deprecated and safe to ignore."` Reading a field whose own payload says not to would be a liability on the next schema change. |
+| `data.label` | The masked API key. Useless as a metric — it is not a number — and semi-sensitive: extracting it would put it in `metrics`, and a `{label}` token would put it on a screen. It is already in the cache file, because the cache holds the raw body; that is the argument for not *promoting* it, not for scrubbing it. |
+| `data.creator_user_id`, `data.expires_at` | Account identity and key lifetime, not usage. Same objection as `label` for the former. |
+| `data.limit_reset` | Read deliberately by *nothing*: **D-23** exists precisely to avoid coupling the shipped config to this enum. `limit_remaining` is already scoped to whatever window this names. |
+| `data.byok_usage`, `data.byok_usage_daily`, `data.byok_usage_weekly`, `data.byok_usage_monthly` | Bring-your-own-key spend, zero on an account that does not use BYOK. Additive as an extra alongside `daily`/`weekly`/`monthly` if someone wants it. |
 
 ## Planned extension points
 

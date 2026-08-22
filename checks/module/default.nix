@@ -1,11 +1,12 @@
 # Pure check for the Home Manager module (`module/default.nix`).
 #
-# This is layer 4 of the ai-usage test pyramid:
+# This is layer 5 of the ai-usage test pyramid:
 #
 #   1. checks/core     pure core semantics (jq + fixtures + configs)
-#   2. checks/config   mkConfig output vs a golden JSON
-#   3. checks/runtime  orchestrator (cache, staleness, throttling)
-#   4. checks/module   THIS FILE: option shape and assertion behaviour
+#   2. checks/laws     the same core, universally quantified
+#   3. checks/config   mkConfig output vs a golden JSON
+#   4. checks/runtime  orchestrator (cache, staleness, throttling)
+#   5. checks/module   THIS FILE: option shape and assertion behaviour
 #
 # Assertions in the module system are *data*, not exceptions: `config.assertions`
 # is a list of `{assertion, message}` that a host evaluator later forces. That

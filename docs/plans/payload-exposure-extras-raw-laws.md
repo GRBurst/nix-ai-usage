@@ -925,11 +925,12 @@ a fresh session can resume without re-deriving it.
 
 Landed and green: **M1** (law harness plus `nullText` escaping), **M2** (`from.timestamp`,
 Claude `resetsAt`), **M3** (OpenRouter window-scoped `percent`), **M4** (opt-in `extras`),
-**M4b** (per-metric `floor`, not originally in this plan), **M5** (`--raw`). Everything from
-section 6 up to and including M5 is **current behaviour**, not proposal. Still
-unimplemented: **M6** (docs, decision register, unused-field register).
+**M4b** (per-metric `floor`, not originally in this plan), **M5** (`--raw`), **M6** (docs,
+decision register, unused-field register). **This plan is fully implemented.** Every section
+above describes current behaviour, not proposal; the authoritative reference is
+`docs/architecture.md`, and this document is history plus the log below.
 
-Resuming. The gate is `nix flake check path:$PWD --no-write-lock-file --keep-going`, which
+For reference. The gate is `nix flake check path:$PWD --no-write-lock-file --keep-going`, which
 must report six derivations: `checks.x86_64-linux.{core,laws,config,runtime,module}` and
 `formatter.x86_64-linux`. Current sizes, useful as a tripwire if a count moves unexpectedly:
 46 `checks/core` rows, 795 `checks/laws` instances, eleven module assertions `A1`..`A11`.
@@ -1391,3 +1392,71 @@ Behaviour worth restating because it is not obvious from the diff: `--raw` inher
 `--refresh`, retry throttling and stale serving *for free*, because it consumes `$body` after
 resolution rather than calling `fetch` itself. Scenarios 4, 6 and 7 pass without a line of
 raw-specific code, which is the whole argument for that placement.
+
+### M6 - docs, complete
+
+Docs only. No production change, no golden movement, no derivation change: the three
+edited `.nix` files were touched in their *header comments*, which Nix strips before the
+derivation, so `nix flake check` reported "running 0 flake checks" with all six
+derivations already valid. That is the expected outcome, not a skipped gate.
+
+| Item | Where it landed |
+| --- | --- |
+| D-20..D-28 recorded, plus the reconstructed D-3..D-19 | `docs/architecture.md` § Decision register |
+| Exit-code table with the document-mode / `--raw` asymmetry | § CLI, plus a new `### --raw` subsection |
+| Deliberately unused fields register | `docs/architecture.md` § Deliberately unused payload fields |
+| `checks/laws` added to the check-ownership table | already present from M1; the *stale copies* were the real finding, below |
+| Extraction guard confirmed | see below |
+| `README.md` on `extras`, `from.timestamp`, `--raw` | already complete from M2/M4/M5; no edit needed |
+
+**The register is an index, not a second explanation.** Every `D-n` row is one line plus a
+pointer to the section that already explains it. Writing the rationale out again would have
+made `docs/architecture.md` its own second owner of the same invariant, which is precisely
+the failure mode the repository's one-owner rule exists to prevent.
+
+**Three findings the plan did not anticipate.**
+
+1. *The four-layer table had four copies, not one.* The plan said "update the four-layer
+   check-ownership table with `checks/laws`", and the table in `docs/architecture.md` was
+   already updated in M1. The stale listings were the ASCII test-pyramid headers at the top
+   of `checks/config/default.nix`, `checks/runtime/default.nix` and
+   `checks/module/default.nix`, each enumerating four layers and each numbering itself.
+   `checks/laws` was invisible from three of the five checks. Fixed by inserting laws as
+   layer 2 and renumbering. `AGENTS.md` said "four `checks`" for the same reason.
+
+2. *The register cannot honestly be complete, and says so.* `D-1`, `D-2`, `D-7`, `D-8`,
+   `D-9`, `D-12`, `D-14`, `D-15`, `D-16` and `D-18` are cited nowhere in the tree, so their
+   meanings are unrecoverable; they are listed as burnt rather than silently reused. Worse,
+   `D-3` is cited at two sites with two *different* meanings — "adding a provider is data,
+   not code" in `module/default.nix:387` and "evaluate against a Home Manager stub" in
+   `checks/module/default.nix:17`. Both are listed under one number. Recording the collision
+   is the honest option; picking a winner retroactively would invalidate one live citation.
+
+3. *Two plan claims about the payloads were wrong in detail, and one docs claim of mine was
+   wrong outright.* Verified against the untracked captures with `jq`:
+   - `extra_usage.utilization` is indeed `null` while `spend.percent` is a number — the
+     plan was right.
+   - `rate_limit.note` is verbatim `"This field is deprecated and safe to ignore."` — right.
+   - `limits[].severity` observed values are only `critical` and `normal`, confirming D-25's
+     "the middle token is unobserved".
+   - The codenamed keys are *not* uniformly all-null: `tangelo`, `iguana_necktie`,
+     `omelette_promotional`, `cinder_cove`, `amber_ladder` and all five `seven_day_*` are
+     null, but `nimbus_quill` is an object with a populated `utilization` and a null
+     `resets_at`. The register states that rather than the plan's blanket claim.
+   - `spend.cap` is *not* an empty account setting: `spend.cap.money` is byte-for-byte the
+     same money object as `spend.limit`, which the `spend` extra already reads. It earned
+     its own row as a duplicate encoding rather than being lumped in with the null flags.
+   - My first draft justified skipping `.data.label` by saying it "would land in a cache
+     file". False: the cache holds the raw body, so it is *already* there. The argument is
+     against promoting it into `metrics` and templates, and the row now says so.
+
+**Extraction guard, confirmed mechanically.** `rg 'osConfig|home-manager|\bconfig\b'` over
+`lib/default.nix`, `module/package.nix` and `module/ai-usage.jq` returns only prose about
+the config *document*, the `--config` flag, and the guard comments themselves — no
+`config.*` host-state read anywhere. `rg -i 'claude|openrouter|anthropic' module/ai-usage.jq`
+is empty, so the core still knows no provider by name. Both greps are cheap enough to be
+worth rerunning; neither is enforced by a check, which is the one follow-up this milestone
+leaves open.
+
+Gate: `nix flake check path:$PWD --no-write-lock-file --keep-going` green on all six
+derivations, and Alejandra reports compliance on the three edited `.nix` files.

@@ -75,7 +75,7 @@ This flake's own `nixpkgs` serves only its checks and formatter. The module buil
 
 ## Workspace Structure
 
-`flake.nix`: flake entrypoint — single `nixpkgs` input, `homeModules`, four `checks`, and the Alejandra `formatter`.
+`flake.nix`: flake entrypoint — single `nixpkgs` input, `homeModules`, five `checks`, and the Alejandra `formatter`.
 `flake.lock`: pinned input graph; do not update casually.
 `lib/default.nix`: pure config builder. `mkConfig` (option tree → schema-v1 config document) and `providerDefaults` (the shipped `claude` and `openrouter` registry). Takes `lib` plus an explicit `homeDirectory`; nothing else.
 `module/default.nix`: the Home Manager module. Declares `programs.aiUsage`, the tagged-union option types, and the nine assertions. The only file permitted to read `config.*`.
@@ -88,7 +88,7 @@ This flake's own `nixpkgs` serves only its checks and formatter. The module buil
 `checks/module/`: option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions.
 `tools/regenerate-goldens.sh`: the only sanctioned way to re-cut the three drift-coupled golden files. `tools/json-fmt.jq` is the formatter it pipes through, and reproduces the checked-in style byte-identically.
 `README.md`: the user-facing surface — install, configure, wire a bar, output contract.
-`docs/architecture.md`: authoritative reference — purity layering, config/document/cache schemas, three-pass resolution semantics, module option reference, assertion register, check layers, planned extension points.
+`docs/architecture.md`: authoritative reference — purity layering, config/document/cache schemas, three-pass resolution semantics, module option reference, assertion register, check layers, decision register (`D-N`), deliberately-unused payload fields, planned extension points.
 `docs/plans/`: implementation plans for accepted-but-unimplemented work. Plans, not current behaviour. Section 10 of each plan is its implementation log: what was verified, and where the plan turned out to be wrong.
 `claude_payload.json`, `openrouter_payload.json`: gitignored scratch captures of real provider responses at the repository root. Not test data and not implementation sources.
 
@@ -222,7 +222,7 @@ Update documentation when behaviour, schemas, user-visible workflows, or invaria
 Use:
 
 - `README.md` for the user-facing surface: install, configure, wire a bar, output contract, development entrypoints. Keep it short and example-led.
-- `docs/architecture.md` as the authoritative reference: schemas, semantics, option reference, assertion register, check ownership, planned extension points.
+- `docs/architecture.md` as the authoritative reference: schemas, semantics, option reference, assertion register, check ownership, the decision register, the deliberately-unused payload fields, planned extension points.
 - `docs/plans/*.md` for accepted-but-unimplemented work. When a plan lands, fold its decisions into `docs/architecture.md` rather than leaving the plan as the only record.
 
 Do not treat `docs/plans/` as current behaviour, and do not treat the root `*_payload.json` captures as implementation sources.
@@ -247,9 +247,9 @@ Two shipped providers: `claude` (Anthropic utilisation, credential from `~/.clau
 
 Eleven module assertions, `A1`..`A11`, are numbered in comments in `module/default.nix` and tabulated in `docs/architecture.md`. `A10` and `A11` police extras: no extra may shadow a base metric, and no two extras of one provider may collide.
 
-Design decisions are cited as `D-N` in code comments, but there is still **no decision register document** — writing one is M6 of the plan below. The numbering collision that used to exist has been resolved: the plan's decisions were renumbered to `D-20`..`D-28`, and every pre-existing in-tree citation (`D-3`..`D-19`, with `D-11` meaning "a null required metric makes the document unknown") was left untouched. Do not introduce a new `D-N` outside the `D-20`..`D-28` range until the register lands; describe the reason inline instead.
+Design decisions are cited as `D-N` in code comments, and the register now lives in `docs/architecture.md` § Decision register. Read it before citing a number. It is explicit about its own provenance: `D-20`..`D-28` are recorded from written rationale, `D-3`..`D-19` are reconstructed from their citation sites, `D-1`/`D-2`/`D-7`/`D-8`/`D-9`/`D-12`/`D-14`/`D-15`/`D-16`/`D-18` are cited nowhere and their meanings are unrecoverable, and `D-3` is cited at two sites with two different meanings. **Do not reuse an unrecoverable number and do not renumber an existing citation.** The next decision to record is `D-29`, and recording it means adding a row to that table in the same change.
 
-`docs/plans/payload-exposure-extras-raw-laws.md` is **largely implemented**. Milestones M1 through M4b have landed: the law harness, `nullText` escaping in the core, `from.timestamp`, the OpenRouter window-scoped `percent` fix, opt-in `extras`, and the per-metric `floor` flag. Section 10 records what was verified and where the plan was wrong. Only `M5` (`--raw`) and `M6` (docs, decision register, unused-field register) remain unimplemented; treat those two sections as a plan and everything above them as current behaviour.
+`docs/plans/payload-exposure-extras-raw-laws.md` is **fully implemented**, M1 through M6: the law harness, `nullText` escaping in the core, `from.timestamp`, the OpenRouter window-scoped `percent` fix, opt-in `extras`, the per-metric `floor` flag, `--raw`, and the two registers in `docs/architecture.md`. Treat the whole document as history, not as a plan; its section 10 is the implementation log and records where the plan turned out to be wrong. Current behaviour is `docs/architecture.md`.
 
 `checks/module` uses a Home Manager stub, so stub drift is invisible here by design.
 

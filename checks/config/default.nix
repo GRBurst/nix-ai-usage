@@ -1,11 +1,12 @@
 # Pure check for the ai-usage config builder (`lib/`).
 #
-# This is layer 2 of the ai-usage test pyramid:
+# This is layer 3 of the ai-usage test pyramid:
 #
 #   1. checks/core     pure core semantics (jq + fixtures + configs)
-#   2. checks/config   THIS FILE: mkConfig output vs a golden JSON
-#   3. checks/runtime  orchestrator (cache, staleness, throttling)
-#   4. checks/module   the Home Manager module: option shape and assertions
+#   2. checks/laws     the same core, universally quantified
+#   3. checks/config   THIS FILE: mkConfig output vs a golden JSON
+#   4. checks/runtime  orchestrator (cache, staleness, throttling)
+#   5. checks/module   the Home Manager module: option shape and assertions
 #
 # `expected.json` is the single place where the shipped provider defaults
 # (endpoints, headers, credential locations, thresholds, templates) are pinned.

@@ -1,10 +1,11 @@
 # Orchestrator check for the ai-usage query package.
 #
-# Layer 3 of the ai-usage test pyramid (see docs/architecture.md):
+# Layer 4 of the ai-usage test pyramid (see docs/architecture.md):
 #   1. checks/core     pure jq core
-#   2. checks/config   pure mkConfig builder
-#   3. checks/runtime  this file: cache, staleness, throttling, atomicity
-#   4. checks/module   Home Manager module option shape and assertions
+#   2. checks/laws     the same core, universally quantified
+#   3. checks/config   pure mkConfig builder
+#   4. checks/runtime  this file: cache, staleness, throttling, atomicity
+#   5. checks/module   Home Manager module option shape and assertions
 #
 # Purity guard: this file must not reference host or Home Manager state. It
 # depends only on nixpkgs and on `module/package.nix`.
