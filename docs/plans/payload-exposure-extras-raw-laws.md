@@ -1154,3 +1154,88 @@ Second vacuous-RED finding, matching M2's `timestamp-total`. The row
 `openrouter-unlimited-has-no-window-usage` passed before the feature existed, because in jq
 an absent key reads as `null`, so `.metrics.windowUsage == null` already held. A row or law
 asserting "is null" cannot RED on a missing feature. Only rows pinning a *value* red.
+
+### M4 - `extras` plus the non-interference law, complete
+
+Delivered: `extraType` and `providers.<name>.extras` with assertions A10 and A11 (module),
+`effectiveMetrics` merging enabled extras (lib), four shipped extras carrying seven metrics,
+six `extras-*` laws over every contained subset pair, and six new `checks/config` rows.
+
+| Step | Verified |
+| ---- | -------- |
+| M4.1 RED | module check aborts: `The option 'programs.aiUsage.providers.claude.extras' does not exist` |
+| M4.2+M4.3 | exactly one failing row left, `enabling-an-extra-adds-metrics-only` |
+| M4.5 GREEN | module check exit 0 |
+| M4.4 | 738 instances (552 + 186), 0 violations |
+| M4.6 | all three goldens: **empty diff** |
+| gate | `nix flake check --keep-going`: core, laws, config, runtime, module, formatter, all passed |
+
+**The empty golden diff is the deliverable, not a missing step.** Four extras carrying seven
+metrics were added and `git diff` over `checks/config/expected.json`,
+`checks/core/configs/claude.json` and `checks/core/configs/openrouter.json` reports nothing
+at all. Every extra defaults to `enable = false`, so `effectiveMetrics` merges nothing and
+`renderProvider` never emits the `extras` key. That absence *is* the assertion that extras
+are opt-in. Because a golden cannot show the mechanism is wired up at all, `checks/config`
+pins the other end of the lattice too, with an `allEnabled` configuration proving that
+turning everything on adds exactly the union of the extras' metric names and nothing else.
+
+Three corrections to this plan, all found by executing it.
+
+**The shipped `spendUsed` filter as written in M4.5 is not total.** It guards
+`amount_minor` but leaves `exponent` unguarded, so a null or missing `exponent` raises
+`null (null) number required` — and this endpoint already returns null for half its fields.
+A string `amount_minor` raises too. The plan's own argument for guarding `amount_minor`
+explicitly was that leaning on the orchestrator's error collapse "would be accidental
+correctness", and that argument applies to `exponent` verbatim. The shipped filter
+type-guards both fields behind an object check on the container:
+
+```jq
+(if (.spend.used | type) == "object" then .spend.used else {} end) as $m
+| if ($m.amount_minor | type) != "number" or ($m.exponent | type) != "number"
+  then null else $m.amount_minor / pow(10; $m.exponent) end
+```
+
+Measured total for every shape whose ancestors are objects or null, which is every shape a
+JSON API can plausibly return for an object-typed field: `{}`, `spend` null, `used` null,
+`used` an array or string, either numeric field null, missing or a string, all give `null`;
+`exponent: 0` gives the minor value unchanged; `exponent: 300` gives `1e-296` without
+raising. It still raises if an *ancestor* is a non-null scalar or array (`{"spend":[]}`).
+Closing that would need `try getpath catch null`, which buys totality by swallowing genuine
+filter typos — something the orchestrator already does one layer out, by design. So the
+boundary is documented rather than closed, and a `badexponent` body is in the law suite as
+the standing witness.
+
+**`checks/laws` had to learn expression pre-evaluation, exactly as `checks/core` did in M3.**
+The non-interference law drives the *real shipped providers*, and both now carry
+`from.expression` metrics — OpenRouter's `windowUsage` and Claude's `spendUsed` /
+`spendLimit`. Without pre-evaluation every one would read `null` and the law would hold
+vacuously. `run-instance.sh` now mirrors the orchestrator loop with the same collapse of a
+failing filter to `null`, and an instance's declared `expressions` is applied on top as an
+override. That is the third copy of that loop (orchestrator, `checks/core`, `checks/laws`),
+and the duplication is deliberate for the same reason each time: a shipped filter is only
+covered if a check executes it.
+
+**`mkPair` needed a `degenerate` parameter.** The first run gave 738 instances and 60
+violations, all `unknown-iff`, none of them `extras-*`. Pair instances inherit
+`expect.degenerate = false` from `mkInstance`, but the `garbage`-body pairs produce `unknown`
+documents. The count is exactly `(3 + 27) x 2`: one Claude extra gives 3 contained subset
+pairs, three OpenRouter extras give 27, two members each. The law was right and the
+generator was wrong — which is the failure mode a law suite is supposed to have.
+
+Non-interference held on the first run for all six laws, over 186 instances covering every
+contained subset pair of both shipped providers across seven body shapes including
+unparsable ones. That is not a weak result: it is what D-24's "metrics only" restriction was
+chosen to guarantee, and the law now holds the restriction in place for any extra added
+later.
+
+Note also that A10 and A11 police the *declaration*, not the enabled subset, so the three
+violating extras in `checks/module` are all declared `enable = false`. Checking only the
+enabled set would mean `enable = true` is what breaks the build, leaving a user to work out
+which of 2^n subsets are legal.
+
+Deferred as YAGNI, as the plan proposed: `extras.perModelLimits` over `limits[]`. The array
+is redundant with the base metrics today (`limits[session].percent == 91 ==
+five_hour.utilization`, `limits[weekly_all].percent == 68 == seven_day.utilization`) and its
+only novel content is one `weekly_scoped` entry at `percent: 0`. It is also the only
+proposed extra needing array aggregation, since `from.path` is `getpath` and therefore
+static. Addable later as pure provider data, zero schema change.

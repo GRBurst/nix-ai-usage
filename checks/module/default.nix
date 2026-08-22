@@ -138,6 +138,41 @@
   vA8 = overlaid {claude.maxStaleAge = 1;};
   vA9 = overlaid {claude.credential = null;};
 
+  # A10 and A11 police the *declaration*, not the enabled subset (D-24). An
+  # extra that would shadow a base metric, or collide with a sibling extra, is
+  # rejected even while disabled: otherwise `enable = true` on an innocent-looking
+  # flag would be the thing that breaks, and the user would have no way to know
+  # which of 2^n subsets are legal. Both are declared disabled here deliberately.
+  vA10 = overlaid {
+    claude.extras.clash = {
+      enable = false;
+      metrics.fiveHour.from.path = ["spend" "percent"];
+    };
+  };
+  vA11 = overlaid {
+    claude.extras.one = {
+      enable = false;
+      metrics.spendUsed.from.path = ["spend" "used" "amount_minor"];
+    };
+    claude.extras.two = {
+      enable = false;
+      metrics.spendUsed.from.path = ["extra_usage" "used_credits"];
+    };
+  };
+
+  # A4 quantifies over every extra for the same reason. A name that cannot be a
+  # template token is a static defect wherever it is declared.
+  vA4Extra = overlaid {
+    claude.extras.bad = {
+      enable = false;
+      metrics.bad_name.from.path = ["spend" "percent"];
+    };
+  };
+
+  # The non-interference witness at the module layer: `checks/laws` quantifies
+  # over every subset, this pins the two ends of the lattice by name.
+  withExtra = overlaid {openrouter.extras.daily.enable = true;};
+
   rows = [
     # ---- positive: the shipped defaults satisfy every assertion ----
     {
@@ -269,6 +304,54 @@
       name = "A9-credential-substitution-needs-a-credential";
       condition = firesWith vA9 "but no credential source is configured";
       message = "a header substituting {credential} with no credential must be rejected";
+    }
+    {
+      name = "A10-extra-must-not-shadow-a-base-metric";
+      condition = firesWith vA10 "already defines metric 'fiveHour'";
+      message = "an extra redefining a base metric must be rejected even while disabled";
+    }
+    {
+      name = "A11-extras-must-not-collide";
+      condition = firesWith vA11 "both define metric 'spendUsed'";
+      message = "two extras defining the same metric must be rejected even while disabled";
+    }
+    {
+      name = "A4-applies-to-disabled-extras";
+      condition = firesWith vA4Extra "metric name 'bad_name' must match";
+      message = "a metric name is a static defect wherever it is declared";
+    }
+
+    # ---- extras are opt-in, and add metrics only (D-24) ----
+    {
+      name = "extras-are-disabled-by-default";
+      condition =
+        !(sigma.providers.claude.metrics ? spendUsed)
+        && !(sigma.providers.openrouter.metrics ? usageDaily);
+      message = "a shipped extra must contribute nothing until it is enabled";
+    }
+    {
+      name = "extras-never-reach-the-document-config";
+      condition = lib.all (p: !(p ? extras)) (lib.attrValues sigma.providers);
+      message = "extras are a module-layer grouping; the core must never see the concept";
+    }
+    {
+      name = "enabling-an-extra-adds-metrics-only";
+      condition = let
+        base = sigma.providers.openrouter;
+        with' = withExtra.programs.aiUsage.settings.providers.openrouter;
+      in
+        (with'.metrics ? usageDaily)
+        && with'.metrics.usageDaily.from.path == ["data" "usage_daily"]
+        && (removeAttrs with'.metrics ["usageDaily"] == base.metrics)
+        && with'.format == base.format
+        && with'.tooltipFormat == base.tooltipFormat
+        && with'.rules == base.rules;
+      message = "enabling an extra must add metrics and change nothing else";
+    }
+    {
+      name = "enabling-an-extra-violates-no-assertion";
+      condition = failures withExtra == [];
+      message = "no subset of the shipped extras may produce an invalid configuration";
     }
   ];
 

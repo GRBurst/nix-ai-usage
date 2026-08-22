@@ -88,7 +88,7 @@ A provider declares where its numbers come from (`source.http` or
 `source.command`), how to authenticate (`credential.file`, `credential.secretTool`
 or `credential.command`), which `metrics` to extract, which `rules` map a number
 onto a severity, and how to `format` the result. Metric names double as template
-tokens. Misconfiguration is caught at evaluation time by nine assertions, not at
+tokens. Misconfiguration is caught at evaluation time by eleven assertions, not at
 runtime in your bar.
 
 A metric can also read a timestamp: `from.timestamp.path` parses an ISO-8601 UTC
@@ -97,6 +97,21 @@ The shipped `claude` provider uses this for `fiveHourResetsAt` and
 `sevenDayResetsAt`, which appear in `metrics` but in no template — so a countdown
 is available to your adapter without this repository deciding how time is
 formatted.
+
+Some payload fields are useful but not worth carrying by default, so they ship as
+`extras` — named metric groups you switch on individually:
+
+```nix
+programs.aiUsage.providers.openrouter.extras.weekly.enable = true;
+programs.aiUsage.providers.claude.extras.spend.enable = true;
+```
+
+`openrouter` ships `daily`, `weekly` and `monthly` spend windows; `claude` ships
+`spend`, which converts Anthropic's minor units into dollars. An extra can
+contribute metrics and nothing else — no rules, no template tokens — so enabling
+one adds keys to `metrics` and cannot change `text`, `tooltip`, `severity` or
+`percentage`. That is checked over every subset of every shipped provider's
+extras, not just asserted here.
 
 `programs.aiUsage.settings` exposes the rendered config document read-only, so
 your own tests can assert on what the module produced.

@@ -113,6 +113,36 @@
     };
   };
 
+  # A named, individually switchable group of additional metrics (D-24). An extra
+  # may contribute metrics and nothing else: no rules, no template tokens, no
+  # interval of its own. That restriction is what makes non-interference
+  # provable rather than merely likely -- with no new rules `severity` and
+  # `percentage` are fixed, and with `format` untouched `text` is fixed, so
+  # enabling any combination of extras can only add keys to `metrics`.
+  extraType = lib.types.submodule {
+    options = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Whether to merge this group's metrics into the provider. Extras are
+          off by default: the payloads they expose are useful to an adapter but
+          would otherwise grow every user's document for no benefit.
+        '';
+      };
+
+      metrics = lib.mkOption {
+        type = lib.types.attrsOf metricType;
+        default = {};
+        description = ''
+          Metrics contributed when this group is enabled. Names must not
+          collide with the provider's base metrics (A10) or with another
+          group's (A11), so the merge order is unobservable.
+        '';
+      };
+    };
+  };
+
   ruleType = lib.types.submodule {
     options = {
       metric = lib.mkOption {
@@ -269,6 +299,15 @@
         default = null;
         description = "Tooltip template. Falls back to `format` when null.";
       };
+      extras = lib.mkOption {
+        type = lib.types.attrsOf extraType;
+        default = {};
+        description = ''
+          Optional metric groups, each switchable with `extras.<name>.enable`.
+          Enabled groups merge into `metrics`; the concept itself never reaches
+          the rendered config, so the pure core has no notion of an extra.
+        '';
+      };
     };
   });
 
@@ -289,6 +328,24 @@
     [provider.format] ++ lib.optional (provider.tooltipFormat != null) provider.tooltipFormat;
 
   isDerived = metric: metric.from ? percentOf;
+
+  # Two different metric sets, and which assertion uses which is load-bearing.
+  #
+  # `effectiveMetrics` is what the document will actually contain, so the
+  # assertions about the emitted document -- A1, A3, A6 -- quantify over it.
+  #
+  # `declaredMetricNames` covers every extra whether enabled or not, because
+  # A4, A10 and A11 are properties of the *declaration*. Checking those only
+  # against the enabled subset would mean a user's `enable = true` is what
+  # breaks the build, leaving them to work out which of 2^n subsets are legal.
+  # Rejecting the declaration makes the error appear where the mistake is.
+  effectiveMetrics = provider:
+    lib.foldl' (acc: extra: acc // extra.metrics) provider.metrics
+    (lib.attrValues (lib.filterAttrs (_: e: e.enable) provider.extras));
+
+  declaredMetricNames = provider:
+    lib.unique (lib.attrNames provider.metrics
+      ++ lib.concatMap (e: lib.attrNames e.metrics) (lib.attrValues provider.extras));
 
   pangoSafe = text: builtins.match ".*[<>&].*" text == null;
 
@@ -356,7 +413,7 @@ in {
         provider,
       }:
         map (rule: {
-          assertion = provider.metrics ? ${rule.metric};
+          assertion = effectiveMetrics provider ? ${rule.metric};
           message = "aiUsage provider '${name}': rule references unknown metric '${rule.metric}'.";
         })
         provider.rules)
@@ -378,16 +435,17 @@ in {
       }:
         lib.concatMap (
           metricName: let
-            metric = provider.metrics.${metricName};
+            metrics = effectiveMetrics provider;
+            metric = metrics.${metricName};
           in
             lib.optionals (isDerived metric) (map (operand: {
               assertion =
-                provider.metrics
+                metrics
                 ? ${operand}
-                && !(isDerived provider.metrics.${operand});
+                && !(isDerived metrics.${operand});
               message = "aiUsage provider '${name}': metric '${metricName}' references '${operand}', which must be an existing non-percentOf metric.";
             }) [metric.from.percentOf.of metric.from.percentOf.total])
-        ) (lib.attrNames provider.metrics))
+        ) (lib.attrNames (effectiveMetrics provider)))
       # A4: metric names are interpolated into a jq regex, so restrict them.
       ++ concatMapProviders ({
         name,
@@ -396,7 +454,7 @@ in {
         map (metricName: {
           assertion = builtins.match "[a-zA-Z][a-zA-Z0-9]*" metricName != null;
           message = "aiUsage provider '${name}': metric name '${metricName}' must match [a-zA-Z][a-zA-Z0-9]* (it is used as a regex and as a template token).";
-        }) (lib.attrNames provider.metrics))
+        }) (declaredMetricNames provider))
       # A5: i3status-rust renders custom block text as pango markup.
       ++ concatMapProviders ({
         name,
@@ -413,7 +471,7 @@ in {
       }:
         lib.concatMap (template:
           map (token: {
-            assertion = provider.metrics ? ${token};
+            assertion = effectiveMetrics provider ? ${token};
             message = "aiUsage provider '${name}': template '${template}' references unknown metric '${token}'.";
           }) (templateTokens template)) (templatesOf provider))
       # A8: the stale window must cover at least one missed refresh.
@@ -439,7 +497,47 @@ in {
               || provider.credential != null;
             message = "aiUsage provider '${name}': a header substitutes {credential} but no credential source is configured.";
           }
-        ]);
+        ])
+      # A10: an extra must not shadow a base metric. Without this, enabling a
+      # group would silently redefine a metric a rule or template depends on,
+      # and `severity` would move -- exactly what extras must not be able to do.
+      ++ concatMapProviders ({
+        name,
+        provider,
+      }:
+        lib.concatMap (
+          extraName:
+            map (metricName: {
+              assertion = !(provider.metrics ? ${metricName});
+              message = "aiUsage provider '${name}': extra '${extraName}' defines metric '${metricName}', but the provider already defines metric '${metricName}'.";
+            }) (lib.attrNames provider.extras.${extraName}.metrics)
+        ) (lib.attrNames provider.extras))
+      # A11: two extras must not define the same metric. Merge order over an
+      # attrset is not something a user should have to reason about, so make
+      # the ambiguity unrepresentable rather than resolving it silently.
+      ++ concatMapProviders ({
+        name,
+        provider,
+      }: let
+        extraNames = lib.attrNames provider.extras;
+        pairs = lib.concatMap (
+          i:
+            map (j: {
+              a = builtins.elemAt extraNames i;
+              b = builtins.elemAt extraNames j;
+            }) (lib.range (i + 1) (builtins.length extraNames - 1))
+        ) (lib.range 0 (builtins.length extraNames - 1));
+      in
+        lib.concatMap (
+          pair:
+            map (metricName: {
+              assertion = false;
+              message = "aiUsage provider '${name}': extras '${pair.a}' and '${pair.b}' both define metric '${metricName}'.";
+            }) (lib.intersectLists
+              (lib.attrNames provider.extras.${pair.a}.metrics)
+              (lib.attrNames provider.extras.${pair.b}.metrics))
+        )
+        pairs);
 
     home.packages = [aiUsage];
   };

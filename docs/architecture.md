@@ -362,6 +362,30 @@ would be a duplicate owner of the same invariant.
 | `rules` | list of rule | `[]` | `{metric, warnAt, criticalAt}` |
 | `format` | string | required | `{metric}` tokens |
 | `tooltipFormat` | string or null | `null` | falls back to `format` |
+| `extras` | attrs of extra | `{}` | optional metric groups, each `extras.<name>.enable` |
+
+An extra contributes metrics and nothing else — no rules, no template tokens, no
+intervals:
+
+```nix
+programs.aiUsage.providers.openrouter.extras.weekly.enable = true;
+```
+
+That restriction is what makes non-interference *provable* rather than merely
+likely. With no new rules, `severity` and `percentage` are fixed; with `format`
+untouched, `text` and `tooltip` are fixed. So enabling any combination of extras
+can only add keys to `metrics`. `checks/laws` states this over every subset of
+every shipped provider's extras, which is the whole justification for the
+restriction.
+
+Extras are a module-layer grouping. `lib/default.nix` merges the enabled ones
+into a single flat metric set and never emits the `extras` key, so the config
+schema above has no notion of an extra and the pure core cannot behave
+differently depending on how a metric got there.
+
+Every shipped extra defaults to `enable = false`, and every metric an extra
+contributes is `required = false`. An extra must never be able to render the
+whole block `?`.
 
 Module assertions (each named in its message, each with a violating
 configuration in `checks/module`):
@@ -377,6 +401,18 @@ configuration in `checks/module`):
 7. at least one provider is enabled when the feature is on
 8. `maxStaleAge >= refreshInterval`
 9. a header substituting `{credential}` has a credential source configured
+10. no extra defines a metric the provider already defines
+11. no two extras of one provider define the same metric
+
+Assertions 1, 3 and 6 quantify over the *effective* metric set — base plus
+enabled extras — because they constrain the document that will be emitted.
+Assertions 4, 10 and 11 quantify over every declared extra, enabled or not,
+because they are properties of the declaration. Checking those only against the
+enabled subset would mean a user's `enable = true` is what breaks the build,
+leaving them to work out which of the 2^n subsets are legal; rejecting the
+declaration puts the error where the mistake is. Assertions 10 and 11 together
+make the merge order unobservable: disjoint name sets mean `//` cannot overwrite
+anything, and `builtins.toJSON` sorts keys.
 
 ## Worked example — an HTTP provider with a keyring credential
 
@@ -454,10 +490,10 @@ Note the descending-threshold form for a "credit remaining" style provider:
 | Check | Layer | Pins |
 | --- | --- | --- |
 | `core` | pure core semantics | 41 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety, timestamp parsing, window-scoped ratios |
-| `laws` | universally quantified properties of the core | 552 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, timestamp totality, determinism |
+| `laws` | universally quantified properties of the core | 738 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, timestamp totality, determinism, extras non-interference over every subset |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
 | `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
-| `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the nine assertions |
+| `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions |
 
 The golden file `checks/config/expected.json` is the single place the shipped
 defaults are pinned. **Consumers must not re-pin them.** A downstream test may

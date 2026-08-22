@@ -29,6 +29,21 @@
         inherit (m) required;
       });
 
+  # Enabled extras merge into the provider's metrics here, in the pure builder,
+  # and the `extras` grouping itself is never emitted: the rendered document
+  # carries one flat metric set and the core has no notion of an extra (D-24).
+  #
+  # Merge order is unobservable. A10 and A11 guarantee the name sets are
+  # pairwise disjoint, so `//` cannot overwrite anything, and `builtins.toJSON`
+  # sorts keys, so the serialised document does not depend on attrset order.
+  #
+  # `p.extras or {}` because `providerDefaults` and the hand-written provider
+  # attrsets in `checks/config` are plain data that predate the option, not
+  # evaluated submodules with defaults filled in.
+  effectiveMetrics = p:
+    lib.foldl' (acc: e: acc // e.metrics) p.metrics
+    (lib.attrValues (lib.filterAttrs (_: e: e.enable) (p.extras or {})));
+
   renderProvider = name: p:
     stripNull {
       # The core reads `$provider.name`; the orchestrator also injects it, but
@@ -48,7 +63,7 @@
         ;
       tooltipFormat = p.tooltipFormat or null;
       credential = p.credential or null;
-      metrics = lib.mapAttrs renderMetric p.metrics;
+      metrics = lib.mapAttrs renderMetric (effectiveMetrics p);
     };
 in {
   # mkConfig :: { providers :: attrsOf provider } -> attrs
@@ -140,6 +155,60 @@ in {
       ];
       format = "{fiveHour}%·{sevenDay}%";
       tooltipFormat = "5h {fiveHour}% · 7d {sevenDay}%";
+
+      extras = {
+        # Anthropic reports spend twice: `spend` as {amount_minor, currency,
+        # exponent} and `extra_usage` as {used_credits, decimal_places}. The
+        # former is preferred -- one canonical encoding, and a currency code
+        # a consumer can display.
+        #
+        # The minor-unit conversion happens here, inside the extra, so that
+        # `unit = "dollars"` stays honest. Exposing `amount_minor` directly
+        # would put a cents value behind a key that does not say cents, which
+        # is the kind of unit confusion that surfaces as a bar showing a
+        # hundred-fold overspend.
+        spend = {
+          enable = false;
+          metrics = {
+            # The API's own percentage, so no arithmetic is needed.
+            spendPercent = {
+              from.path = ["spend" "percent"];
+              unit = "percent";
+              required = false;
+              nullText = null;
+            };
+            # Both numeric fields are type-guarded rather than merely
+            # null-checked: this endpoint returns null for many fields, and a
+            # null `exponent` would make the division raise. The orchestrator
+            # would collapse that raise to null anyway, but depending on it
+            # would be accidental correctness.
+            spendUsed = {
+              from.expression = ''
+                (if (.spend.used | type) == "object" then .spend.used else {} end) as $m
+                | if ($m.amount_minor | type) != "number" or ($m.exponent | type) != "number"
+                  then null
+                  else $m.amount_minor / pow(10; $m.exponent)
+                  end
+              '';
+              unit = "dollars";
+              required = false;
+              nullText = null;
+            };
+            spendLimit = {
+              from.expression = ''
+                (if (.spend.limit | type) == "object" then .spend.limit else {} end) as $m
+                | if ($m.amount_minor | type) != "number" or ($m.exponent | type) != "number"
+                  then null
+                  else $m.amount_minor / pow(10; $m.exponent)
+                  end
+              '';
+              unit = "dollars";
+              required = false;
+              nullText = "∞";
+            };
+          };
+        };
+      };
     };
 
     openrouter = {
@@ -226,6 +295,40 @@ in {
       ];
       format = "{usage}/{limit}";
       tooltipFormat = "used {usage} of {limit} · {remaining} left";
+
+      # Three independent windows the endpoint already reports. They are split
+      # into one extra each rather than grouped, because a user wanting a daily
+      # figure has no reason to also carry a monthly one, and the subset lattice
+      # is what `checks/laws` quantifies non-interference over.
+      extras = {
+        daily = {
+          enable = false;
+          metrics.usageDaily = {
+            from.path = ["data" "usage_daily"];
+            unit = "dollars";
+            required = false;
+            nullText = null;
+          };
+        };
+        weekly = {
+          enable = false;
+          metrics.usageWeekly = {
+            from.path = ["data" "usage_weekly"];
+            unit = "dollars";
+            required = false;
+            nullText = null;
+          };
+        };
+        monthly = {
+          enable = false;
+          metrics.usageMonthly = {
+            from.path = ["data" "usage_monthly"];
+            unit = "dollars";
+            required = false;
+            nullText = null;
+          };
+        };
+      };
     };
   };
 }

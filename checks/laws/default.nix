@@ -101,6 +101,11 @@
     bodies,
     direction ? null,
     metas ? [freshMeta freshMeta],
+    # A pair is still subject to every unary law, `unknown-iff` included, so a
+    # pair over an unparsable body has to declare that it degenerates. Both
+    # members share the value: a relation is only meaningful between two
+    # documents that agree on whether they are documents at all.
+    degenerate ? false,
   }:
     lib.imap0 (idx: _:
       mkInstance {
@@ -112,7 +117,7 @@
         meta = builtins.elemAt metas idx;
         expect = {
           pair = relation;
-          inherit direction;
+          inherit direction degenerate;
         };
       }) [0 1];
 
@@ -880,6 +885,174 @@
     value = [(-1) 0.4 0.5 79.9 100.1 155.984825867];
   });
 
+  # ---- extras non-interference (D-24) ----
+  #
+  # The strongest law in this file, and the one that justifies restricting an
+  # extra to contributing metrics. It quantifies over every subset of every
+  # shipped provider's extras, so "enabling a flag is harmless" becomes a
+  # property of the mechanism rather than a claim about the groups that happen
+  # to ship today.
+  #
+  # It drives the *real* shipped providers through the *real* pure builder, so
+  # it also exercises the shipped `from.expression` filters -- which is why
+  # run-instance.sh pre-evaluates them.
+  aiLib = import ../../lib {inherit lib;};
+
+  shipped = aiLib.providerDefaults {homeDirectory = "/home/testuser";};
+
+  # An enable assignment, rendered through mkConfig so the merge under test is
+  # the one that ships rather than a restatement of it here.
+  renderSubset = name: sel:
+    (aiLib.mkConfig {
+      providers.${name} =
+        shipped.${name}
+        // {
+          extras =
+            lib.mapAttrs (n: e: e // {enable = sel.${n};})
+            shipped.${name}.extras;
+        };
+    })
+    .providers
+    .${
+      name
+    };
+
+  subsetsOf = name:
+    lib.cartesianProduct
+    (lib.genAttrs (lib.attrNames shipped.${name}.extras) (_: [false true]));
+
+  # S subset-of S', pointwise on the flags.
+  contained = a: b: lib.all (n: !a.${n} || b.${n}) (lib.attrNames a);
+
+  subsetLabel = sel: let
+    on = lib.attrNames (lib.filterAttrs (_: v: v) sel);
+  in
+    if on == []
+    then "none"
+    else lib.concatStringsSep "-" on;
+
+  # Bodies chosen so the law is checked where the extras' fields are present,
+  # absent, ill-typed, and where the document is `unknown` outright.
+  claudeExtrasBodies = [
+    {
+      id = "full";
+      body = builtins.toJSON {
+        five_hour = {
+          utilization = 91.0;
+          resets_at = "2026-08-21T23:10:00.029760+00:00";
+        };
+        seven_day = {
+          utilization = 68.0;
+          resets_at = "2026-08-24T20:00:00.029792+00:00";
+        };
+        spend = {
+          used = {
+            amount_minor = 10000;
+            currency = "EUR";
+            exponent = 2;
+          };
+          limit = {
+            amount_minor = 0;
+            currency = "EUR";
+            exponent = 2;
+          };
+          percent = 0;
+        };
+      };
+    }
+    {
+      id = "nospend";
+      body = builtins.toJSON {
+        five_hour = {utilization = 12.0;};
+        seven_day = {utilization = 34.0;};
+      };
+    }
+    {
+      # A null exponent is the case the shipped filter type-guards: without the
+      # guard the division raises and only the orchestrator's collapse saves it.
+      id = "badexponent";
+      body = builtins.toJSON {
+        five_hour = {utilization = 12.0;};
+        seven_day = {utilization = 34.0;};
+        spend = {
+          used = {
+            amount_minor = 10000;
+            exponent = null;
+          };
+          limit = null;
+          percent = null;
+        };
+      };
+    }
+    {
+      # Non-interference has to hold where both documents are `unknown` too:
+      # that is the case where a bug could let an extra resurrect a metric.
+      id = "garbage";
+      body = "not json at all";
+      degenerate = true;
+    }
+  ];
+
+  openrouterExtrasBodies = [
+    {
+      id = "full";
+      body = builtins.toJSON {
+        data = {
+          limit = 200;
+          limit_remaining = 44.01517413299999;
+          limit_reset = "monthly";
+          usage = 155.984825867;
+          usage_daily = 0;
+          usage_weekly = 11.415461617;
+          usage_monthly = 155.984825867;
+        };
+      };
+    }
+    {
+      id = "nowindows";
+      body = builtins.toJSON {
+        data = {
+          limit = 20;
+          limit_remaining = 12.5;
+          usage = 7.5;
+        };
+      };
+    }
+    {
+      id = "garbage";
+      body = "not json at all";
+      degenerate = true;
+    }
+  ];
+
+  extrasPairsFor = name: bodies:
+    lib.concatMap (
+      body:
+        lib.concatMap (
+          small:
+            lib.concatMap (
+              large:
+                lib.optionals (contained small large) [
+                  (mkPair {
+                    id = "extras-${name}-${body.id}-${subsetLabel small}-le-${subsetLabel large}";
+                    relation = "extras-noninterference";
+                    providers = [(renderSubset name small) (renderSubset name large)];
+                    bodies = [body.body body.body];
+                    # Only the unparsable bodies degenerate. Every other body
+                    # supplies each provider's required metrics, and an extra
+                    # metric is never required, so no subset can change that.
+                    degenerate = body.degenerate or false;
+                  })
+                ]
+            ) (subsetsOf name)
+        ) (subsetsOf name)
+    )
+    bodies;
+
+  familyExtras =
+    lib.flatten (extrasPairsFor "claude" claudeExtrasBodies)
+    ++ lib.flatten (extrasPairsFor "openrouter" openrouterExtrasBodies);
+
   instances =
     familyA
     ++ familyStale
@@ -894,7 +1067,8 @@
     ++ pairPermutation
     ++ pairInclusion
     ++ pairMonotone
-    ++ familyIdempotent;
+    ++ familyIdempotent
+    ++ familyExtras;
 
   instancesFile =
     builtins.toFile "ai-usage-law-instances.json" (builtins.toJSON instances);

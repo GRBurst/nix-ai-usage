@@ -178,6 +178,32 @@ def relation($a; $b):
                and $a.doc.text == $b.doc.text;
                pairDetail($a; $b) + {metric: $m}) )
 
+    # Extras non-interference (D-24). $a is the smaller subset, $b the larger.
+    # An extra may contribute metrics and nothing else, so enabling any
+    # combination must leave the rendered document alone and only add keys.
+    # This is the law that justifies the restriction: without it, "extras are
+    # harmless" would be a claim about the four groups that ship today rather
+    # than a property of the mechanism.
+    elif $rel == "extras-noninterference"
+    then ( law("extras-text"; $a; $a.doc.text == $b.doc.text; pairDetail($a; $b))
+         , law("extras-severity"; $a;
+               $a.doc.severity == $b.doc.severity; pairDetail($a; $b))
+         , law("extras-percentage"; $a;
+               $a.doc.percentage == $b.doc.percentage; pairDetail($a; $b))
+         , law("extras-tooltip"; $a;
+               $a.doc.tooltip == $b.doc.tooltip; pairDetail($a; $b))
+         # metrics grows monotonically ...
+         , law("extras-metrics-grow"; $a;
+               (($a.doc.metrics | keys) - ($b.doc.metrics | keys)) == [];
+               pairDetail($a; $b)
+               + {missing: (($a.doc.metrics | keys) - ($b.doc.metrics | keys))})
+         # ... and agrees on every key the smaller subset already had, so an
+         # extra cannot redefine a base metric even by coincidence (A10, A11).
+         , law("extras-metrics-agree"; $a;
+               ($a.doc.metrics | keys) | all(. as $k
+                 | $a.doc.metrics[$k] == $b.doc.metrics[$k]);
+               pairDetail($a; $b)) )
+
     else law("unknown-relation"; $a; false; {relation: $rel})
     end;
 

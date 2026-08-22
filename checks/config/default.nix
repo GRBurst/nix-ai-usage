@@ -46,6 +46,24 @@
       };
   };
 
+  # Every shipped extra is opt-in, so the golden above is byte-identical to what
+  # it was before extras existed. That absence is the strongest statement the
+  # golden can make, but it cannot show the groups are wired up at all -- so
+  # pin the other end of the lattice too (D-24).
+  defaults = aiLib.providerDefaults {homeDirectory = "/home/testuser";};
+
+  allEnabled = aiLib.mkConfig {
+    providers =
+      lib.mapAttrs (
+        _: p: p // {extras = lib.mapAttrs (_: e: e // {enable = true;}) p.extras;}
+      )
+      defaults;
+  };
+
+  extraMetricNames = p: lib.concatMap (e: lib.attrNames e.metrics) (lib.attrValues p.extras);
+
+  sorted = names: lib.sort (a: b: a < b) names;
+
   actualFile = pkgs.writeText "ai-usage-config-actual.json" (builtins.toJSON actual);
   goldenFile = pkgs.writeText "ai-usage-config-golden.json" (builtins.toJSON golden);
 
@@ -117,6 +135,53 @@
         && !(lib.hasInfix "ResetsAt" actual.providers.claude.tooltipFormat)
         && !(lib.any (r: lib.hasSuffix "ResetsAt" r.metric) actual.providers.claude.rules);
       message = "exposing a timestamp must not change what the bar renders or how severity is computed (D-22)";
+    }
+    # ---- extras are opt-in and add metrics only (D-24) ----
+    {
+      name = "shipped-extras-are-all-disabled";
+      condition = lib.all (p: lib.all (e: !e.enable) (lib.attrValues p.extras)) (lib.attrValues defaults);
+      message = "every shipped extra must default to enable = false";
+    }
+    {
+      name = "shipped-extras-exist";
+      condition =
+        (lib.attrNames defaults.claude.extras == ["spend"])
+        && (lib.attrNames defaults.openrouter.extras == ["daily" "monthly" "weekly"]);
+      message = "the shipped providers must declare the documented extra groups";
+    }
+    {
+      name = "disabled-extras-contribute-no-metrics";
+      condition = lib.all (
+        name: lib.attrNames actual.providers.${name}.metrics == lib.attrNames defaults.${name}.metrics
+      ) (lib.attrNames actual.providers);
+      message = "with every extra disabled the rendered metric set must equal the base metric set";
+    }
+    {
+      name = "extras-never-appear-in-the-rendered-config";
+      condition = lib.all (p: !(p ? extras)) (lib.attrValues allEnabled.providers);
+      message = "extras are a module-layer grouping; the rendered config must carry one flat metric set";
+    }
+    {
+      name = "enabling-every-extra-adds-exactly-its-metrics";
+      condition = lib.all (
+        name:
+          lib.attrNames allEnabled.providers.${name}.metrics
+          == sorted (lib.attrNames defaults.${name}.metrics ++ extraMetricNames defaults.${name})
+      ) (lib.attrNames allEnabled.providers);
+      message = "enabling every extra must add exactly the extras' metrics and nothing else";
+    }
+    {
+      # A10 and A11 at the config layer: the module rejects a collision, so the
+      # merge in `mkConfig` can never overwrite and its order is unobservable.
+      name = "extra-metric-names-are-disjoint";
+      condition = lib.all (
+        name: let
+          base = lib.attrNames defaults.${name}.metrics;
+          added = extraMetricNames defaults.${name};
+        in
+          (lib.intersectLists base added == []) && (lib.unique added == sorted added)
+      ) (lib.attrNames defaults);
+      message = "extra metric names must not collide with base metrics or with each other";
     }
     {
       name = "provider-name-is-injected";

@@ -38,8 +38,27 @@ run_core() {
   printf '%s' "$_instance" | jq -j '.body' >"$_bodyFile"
 
   _provider=$(printf '%s' "$_instance" | jq -c '.provider')
-  _expressions=$(printf '%s' "$_instance" | jq -c '.expressions')
   _meta=$(printf '%s' "$_instance" | jq -c '.meta')
+
+  # Resolve `from.expression` metrics the way `module/package.nix` does, with the
+  # same collapse of a failing or unparsable filter to `null`. jq has no `eval`,
+  # so the core receives values rather than filters (D-5), and a shipped filter is
+  # only genuinely covered if a check executes it. The laws quantify over the real
+  # shipped providers, so the harness has to run the real filters; an instance's
+  # own `expressions` is layered on top, as an override for a value the
+  # orchestrator can produce but a filter cannot be made to.
+  _expressions='{}'
+  for _m in $(printf '%s' "$_provider" |
+    jq -r '(.metrics // {}) | to_entries[]
+           | select(.value.from | has("expression")) | .key'); do
+    _filter=$(printf '%s' "$_provider" | jq -r --arg m "$_m" '.metrics[$m].from.expression')
+    _value=$(jq -c "$_filter" "$_bodyFile" 2>/dev/null) || _value=null
+    printf '%s' "$_value" | jq -e . >/dev/null 2>&1 || _value=null
+    _expressions=$(printf '%s' "$_expressions" |
+      jq -c --arg m "$_m" --argjson v "$_value" '. + {($m): $v}')
+  done
+  _expressions=$(printf '%s' "$_expressions" |
+    jq -c --argjson o "$(printf '%s' "$_instance" | jq -c '.expressions')" '. + $o')
 
   if raw=$(
     jq -n -c --from-file "$program" \
