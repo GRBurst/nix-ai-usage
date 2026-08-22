@@ -921,6 +921,26 @@ unchanged.
 Append one subsection per milestone. Record what was *verified*, not what was intended, so
 a fresh session can resume without re-deriving it.
 
+### State of the tree
+
+Landed and green: **M1** (law harness plus `nullText` escaping), **M2** (`from.timestamp`,
+Claude `resetsAt`), **M3** (OpenRouter window-scoped `percent`), **M4** (opt-in `extras`),
+**M4b** (per-metric `floor`, not originally in this plan). Everything from section 6 up to
+and including M4b is **current behaviour**, not proposal. Still unimplemented: **M5**
+(`--raw`, D-26) and **M6** (docs, decision register, unused-field register).
+
+Resuming. The gate is `nix flake check path:$PWD --no-write-lock-file --keep-going`, which
+must report six derivations: `checks.x86_64-linux.{core,laws,config,runtime,module}` and
+`formatter.x86_64-linux`. Current sizes, useful as a tripwire if a count moves unexpectedly:
+46 `checks/core` rows, 795 `checks/laws` instances, eleven module assertions `A1`..`A11`.
+Formatting is not part of the gate; run Alejandra explicitly. Goldens are re-cut only with
+`./tools/regenerate-goldens.sh`, never by hand.
+
+Two environment facts that cost time to rediscover. Commits must pass `--no-gpg-sign`,
+because `~/.gnupg` is on the sandbox deny list while `commit.gpgsign` is true; the user
+re-signs later. Heredocs of every kind fail in the agent shell, so append to a file with an
+editor tool rather than `cat >>`, and pass one `-m` per commit-message paragraph.
+
 ### M0 - preconditions verified
 
 Environment. `nix flake check path:$HOME/projects/nix/ai-usage --no-write-lock-file

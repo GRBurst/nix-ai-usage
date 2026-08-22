@@ -85,15 +85,16 @@ This flake's own `nixpkgs` serves only its checks and formatter. The module buil
 `checks/laws/`: universally quantified properties of the same core, over instances generated in Nix (`default.nix`), executed one-per-instance by `run-instance.sh`, and verified in pure jq (`laws.jq`). Bounded-exhaustive, no randomness, reports every violation.
 `checks/config/`: golden test pinning `mkConfig` output against `expected.json`, plus drift detection against `checks/core/configs`.
 `checks/runtime/`: orchestrator behaviour against stub `curl`/`secret-tool` — caching, staleness, throttling, credentials, exit codes, concurrency.
-`checks/module/`: option shape, `settings` contents, package installation, and a violating configuration for each of the nine assertions.
+`checks/module/`: option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions.
+`tools/regenerate-goldens.sh`: the only sanctioned way to re-cut the three drift-coupled golden files. `tools/json-fmt.jq` is the formatter it pipes through, and reproduces the checked-in style byte-identically.
 `README.md`: the user-facing surface — install, configure, wire a bar, output contract.
 `docs/architecture.md`: authoritative reference — purity layering, config/document/cache schemas, three-pass resolution semantics, module option reference, assertion register, check layers, planned extension points.
-`docs/plans/`: implementation plans for accepted-but-unimplemented work. Plans, not current behaviour.
-`claude_payload.json`, `openrouter_payload.json`: untracked scratch captures of real provider responses at the repository root. Not test data and not implementation sources.
+`docs/plans/`: implementation plans for accepted-but-unimplemented work. Plans, not current behaviour. Section 10 of each plan is its implementation log: what was verified, and where the plan turned out to be wrong.
+`claude_payload.json`, `openrouter_payload.json`: gitignored scratch captures of real provider responses at the repository root. Not test data and not implementation sources.
 
 ## Change Routing
 
-For provider defaults (endpoints, headers, credential locations, thresholds, templates) or the rendered config schema, start in `lib/default.nix`, then re-cut `checks/config/expected.json`.
+For provider defaults (endpoints, headers, credential locations, thresholds, templates) or the rendered config schema, start in `lib/default.nix`, then re-cut the goldens with `./tools/regenerate-goldens.sh`.
 For option types, option documentation, or evaluation-time invariants, start in `module/default.nix`.
 For fetching, caching, credentials, staleness, CLI flags, or exit codes, start in `module/package.nix`.
 For document semantics — metric extraction, normalisation, severity, rendering — start in `module/ai-usage.jq`.
@@ -110,13 +111,15 @@ Each layer owns exactly one thing. Put a test where its owner lives; do not dupl
 
 | Check     | Owns                                               | Add a case here when changing                                                                                              |
 | --------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `core`    | pure jq semantics                                  | extraction, units, clamping/flooring, severity, templates, `percentage`, metric order, pango safety, staleness rendering   |
+| `core`    | pure jq semantics                                  | extraction, units, clamping, truncation and `floor = false`, severity, templates, `percentage`, metric order, pango safety, staleness rendering |
 | `laws`    | universally quantified properties of the same core | any new invariant that should hold for *all* inputs rather than at a named point: totality, ranges, monotonicity, algebraic identities, determinism |
 | `config`  | the shipped defaults and the rendered config shape | provider defaults, null stripping, key omission, disabled-provider filtering                                               |
 | `runtime` | the orchestrator                                   | cache, refresh/retry intervals, stale serving, credential kinds, `command` sources, exit codes, atomic writes, concurrency |
 | `module`  | the Home Manager module                            | option types, `settings`, package installation, assertion firing                                                           |
 
 `checks/config/expected.json` is the single place the shipped defaults are pinned. Changing a default means re-cutting the golden file deliberately, in the same change, with the reason stated. Do not weaken the golden diff to make a change pass.
+
+Three files move together and must be re-cut in one step with `./tools/regenerate-goldens.sh`: `checks/config/expected.json`, `checks/core/configs/claude.json` and `checks/core/configs/openrouter.json`. `checks/config` asserts the latter two equal the shipped defaults, so editing `lib/default.nix` without regenerating fails the drift check. Never hand-edit a golden and never adjust one to match the code — the `git diff` is the review artefact.
 
 Assertions are testable in both directions: in the module system they are _data_ (`{assertion, message}`), not exceptions. A new assertion is incomplete without a violating configuration in `checks/module` proving it actually fires.
 
@@ -242,11 +245,11 @@ Systems are `x86_64-linux` and `aarch64-linux`; there is no host configuration i
 
 Two shipped providers: `claude` (Anthropic utilisation, credential from `~/.claude/.credentials.json`) and `openrouter` (credit balance, credential from the libsecret keyring under service `openrouter_usage`, account `status_bar`). Both runtime dependencies are unenforced by Nix and degrade the corresponding provider when absent.
 
-Nine module assertions, `A1`..`A9`, are numbered in comments in `module/default.nix` and tabulated in `docs/architecture.md`.
+Eleven module assertions, `A1`..`A11`, are numbered in comments in `module/default.nix` and tabulated in `docs/architecture.md`. `A10` and `A11` police extras: no extra may shadow a base metric, and no two extras of one provider may collide.
 
-Design decisions are cited as `D-N` in code comments, but there is **no decision register document**. Worse, the numbering has collided: `D-11` means "a null required metric makes the document unknown" in `lib/default.nix` and `module/default.nix`, while `docs/plans/payload-exposure-extras-raw-laws.md` introduces a different `D-11`. Do not add new `D-N` citations until the register is reconciled; describe the reason inline instead.
+Design decisions are cited as `D-N` in code comments, but there is still **no decision register document** — writing one is M6 of the plan below. The numbering collision that used to exist has been resolved: the plan's decisions were renumbered to `D-20`..`D-28`, and every pre-existing in-tree citation (`D-3`..`D-19`, with `D-11` meaning "a null required metric makes the document unknown") was left untouched. Do not introduce a new `D-N` outside the `D-20`..`D-28` range until the register lands; describe the reason inline instead.
 
-`docs/plans/payload-exposure-extras-raw-laws.md` records accepted design work that is **not implemented**, including a known arithmetic defect in OpenRouter's `percent` (all-time `usage` over a windowed `limit`) and unescaped `nullText` reaching `text`/`tooltip`. Treat it as a plan, and check it before designing in the same area.
+`docs/plans/payload-exposure-extras-raw-laws.md` is **largely implemented**. Milestones M1 through M4b have landed: the law harness, `nullText` escaping in the core, `from.timestamp`, the OpenRouter window-scoped `percent` fix, opt-in `extras`, and the per-metric `floor` flag. Section 10 records what was verified and where the plan was wrong. Only `M5` (`--raw`) and `M6` (docs, decision register, unused-field register) remain unimplemented; treat those two sections as a plan and everything above them as current behaviour.
 
 `checks/module` uses a Home Manager stub, so stub drift is invisible here by design.
 
