@@ -129,11 +129,15 @@
     threshold,
     required ? true,
     nullText ? null,
+    # Null rather than true so `filterAttrs` drops it, which keeps every
+    # pre-existing family rendering exactly the config it rendered before the
+    # flag existed. Absent means truncate, so only `false` needs emitting.
+    floor ? null,
   }: {
     name = "laws";
     metrics.x = lib.filterAttrs (_: v: v != null) {
       from = {path = ["x"];};
-      inherit unit required nullText;
+      inherit unit required nullText floor;
     };
     rules = [({metric = "x";} // threshold)];
     format = "{x}";
@@ -185,6 +189,49 @@
     unit = units;
     value = numVals;
     threshold = thresholds;
+  });
+
+  # Family A'' -- `floor = false`, over the same domain. `norm-integral` is
+  # deliberately silent here, so the teeth are in `expect.metrics`: every value
+  # is pinned to the clamp with no truncation applied. Without a pinned
+  # expectation this family would pass against a core that ignored the flag,
+  # which is precisely the bug the first implementation had.
+  #
+  # `raw` is exempt from both clamping and truncation, so its expectation is the
+  # input itself -- which also states that the flag cannot start truncating a
+  # unit that never truncated.
+  clampOnly = unit: v:
+    if unit == "percent"
+    then
+      (
+        if v < 0
+        then 0
+        else if v > 100
+        then 100
+        else v
+      )
+    else if unit == "dollars"
+    then
+      (
+        if v < 0
+        then 0
+        else v
+      )
+    else v;
+
+  familyUnfloored = lib.imap0 (i: c:
+    mkInstance {
+      name = "unfloored-${c.unit}-${toString i}";
+      provider = singleProvider {
+        inherit (c) unit;
+        threshold = ascending;
+        floor = false;
+      };
+      body = jsonX c.value;
+      expect.metrics = {x = clampOnly c.unit c.value;};
+    }) (lib.cartesianProduct {
+    unit = units;
+    value = numVals;
   });
 
   # Family A' -- the same shape served from a stale cache, which is the only way
@@ -1055,6 +1102,7 @@
 
   instances =
     familyA
+    ++ familyUnfloored
     ++ familyStale
     ++ familyB
     ++ familyC

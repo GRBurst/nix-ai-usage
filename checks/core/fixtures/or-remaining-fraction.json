@@ -1,0 +1,10 @@
+{
+  "data": {
+    "label": "sk-or-v1-abc...5a5",
+    "limit": 20,
+    "limit_remaining": 5.5,
+    "limit_reset": "monthly",
+    "usage": 14.5,
+    "is_free_tier": false
+  }
+}

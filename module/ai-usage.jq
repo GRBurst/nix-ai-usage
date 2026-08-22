@@ -38,11 +38,23 @@ def epoch:
 
 def unitOf($m): $m.unit // "raw";
 
-def norm($unit):
+# `unit` owns clamping, `floor` owns truncation. They are separate because a bar
+# wants `77%` while an adapter summing currency wants `155.984825867`; a metric
+# can need the clamp and not the truncation. Absent `floor` means true, so a
+# config written before the flag existed keeps its behaviour exactly. `raw` is
+# exempt from both: it always passed values through untouched, and flooring it
+# now would silently truncate every existing `raw` metric.
+# The parameter is `$truncate`, not `$floor`: a parameter named `floor` shadows
+# the builtin of the same name inside the body, so `then floor` would return the
+# flag instead of truncating the value.
+def norm($unit; $truncate):
   if . == null then null
-  elif $unit == "percent" then ((if . < 0 then 0 elif . > 100 then 100 else . end) | floor)
-  elif $unit == "dollars" then ((if . < 0 then 0 else . end) | floor)
-  else . end;
+  else
+    (if $unit == "percent" then (if . < 0 then 0 elif . > 100 then 100 else . end)
+     elif $unit == "dollars" then (if . < 0 then 0 else . end)
+     else . end)
+    | if $truncate and ($unit != "raw") then floor else . end
+  end;
 
 def entries: ($provider.metrics // {}) | to_entries;
 
@@ -75,10 +87,17 @@ def pass2($raw):
            end)} )
     else . end);
 
-# Pass 3 -- normalisation. `unit` defines both the domain and the rendering.
+# Pass 3 -- normalisation. `unit` defines the domain and the rendering, `floor`
+# whether the value is truncated to a whole number on the way out. `floor` is
+# read with `has`, not `//`: `false // true` is `true` in jq, so the alternative
+# operator cannot default a boolean whose meaningful value is `false` -- the
+# same trap `isRequired` documents below.
 def pass3($raw):
   reduce (entries | .[]) as $e ({};
-    . + {($e.key): ($raw[$e.key] | norm(unitOf($e.value)))});
+    . + {($e.key):
+      ($raw[$e.key]
+       | norm(unitOf($e.value);
+              if ($e.value | has("floor")) then $e.value.floor else true end))});
 
 # Derived metrics are never required; a typo'd path or expression is.
 # `//` cannot be used to default `required`, because `false // true` is `true`.

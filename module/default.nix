@@ -90,9 +90,32 @@
         type = lib.types.enum ["percent" "dollars" "raw"];
         default = "raw";
         description = ''
-          Normalisation and rendering. `percent` clamps to 0-100 then floors,
-          `dollars` clamps at 0 then floors and renders with a leading `$`,
-          `raw` passes the value through untouched.
+          Clamping and rendering. `percent` clamps to 0-100, `dollars` clamps at
+          0 and renders with a leading `$`, `raw` passes the value through
+          untouched. Truncation to a whole number is a separate concern; see
+          `floor`.
+        '';
+      };
+      floor = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether to truncate the clamped value to a whole number. On by
+          default, because a status bar has room for `77%` and not for
+          `77.9924129335%`.
+
+          Set it to `false` when an adapter needs the provider's own precision:
+          the value then reaches `metrics` unrounded, so `44.01517413299999`
+          stays `44.01517413299999` instead of collapsing to `44`.
+
+          Two consequences are worth knowing before switching it off. The
+          rendered form becomes the provider's, because jq reproduces the
+          literal text of a number it has not computed on -- Anthropic sends
+          `"utilization": 91.0`, so `text` reads `91.0%`, and a very small
+          computed value can appear in exponent form such as `1e-06`. And a
+          descending rule fires later, since `floor 5.5 <= 5` holds where
+          `5.5 <= 5` does not; an ascending rule with whole thresholds is
+          unaffected, as `floor v >= T` and `v >= T` agree when `T` is whole.
         '';
       };
       nullText = lib.mkOption {

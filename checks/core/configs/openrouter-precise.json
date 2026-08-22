@@ -1,0 +1,77 @@
+{
+  "credential": {
+    "secretTool": {
+      "account": "status_bar",
+      "service": "openrouter_usage"
+    }
+  },
+  "enable": true,
+  "format": "{usage}/{limit}",
+  "maxStaleAge": 900,
+  "metrics": {
+    "limit": {
+      "from": {
+        "path": ["data", "limit"]
+      },
+      "nullText": "∞",
+      "required": false,
+      "unit": "dollars"
+    },
+    "percent": {
+      "floor": false,
+      "from": {
+        "percentOf": {
+          "of": "windowUsage",
+          "total": "limit"
+        }
+      },
+      "unit": "percent"
+    },
+    "remaining": {
+      "floor": false,
+      "from": {
+        "path": ["data", "limit_remaining"]
+      },
+      "nullText": "∞",
+      "required": false,
+      "unit": "dollars"
+    },
+    "usage": {
+      "floor": false,
+      "from": {
+        "path": ["data", "usage"]
+      },
+      "required": true,
+      "unit": "dollars"
+    },
+    "windowUsage": {
+      "floor": false,
+      "from": {
+        "expression": "if (.data.limit == null) or (.data.limit_remaining == null)\nthen null\nelse .data.limit - .data.limit_remaining\nend\n"
+      },
+      "nullText": "∞",
+      "required": false,
+      "unit": "dollars"
+    }
+  },
+  "name": "openrouter",
+  "refreshInterval": 300,
+  "retryInterval": 60,
+  "rules": [
+    {
+      "criticalAt": 90,
+      "metric": "percent",
+      "warnAt": 80
+    }
+  ],
+  "source": {
+    "http": {
+      "headers": {
+        "Authorization": "Bearer {credential}"
+      },
+      "url": "https://openrouter.ai/api/v1/key"
+    }
+  },
+  "timeout": 3,
+  "tooltipFormat": "used {usage} of {limit} · {remaining} left"
+}

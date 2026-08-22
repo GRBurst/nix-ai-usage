@@ -74,6 +74,17 @@ def shape($r):
 
 # `unit` defines the domain of the normalised value, so every reported metric
 # must already sit inside it -- which is also idempotence stated pointwise.
+#
+# Clamping and truncation are separate concerns and so are their laws.
+# `norm-domain` covers the clamp, which `unit` owns unconditionally.
+# `norm-integral` covers the truncation, which the per-metric `floor` flag owns,
+# so it must not fire on a metric that deliberately opted out. Read with
+# `has("floor")` rather than `//`: the alternative operator cannot default a
+# boolean whose meaningful value is `false`, a trap the core walked into once.
+def truncatesOf($r; $name):
+  ($r.instance.provider.metrics[$name]) as $m
+  | if ($m | type) == "object" and ($m | has("floor")) then $m.floor else true end;
+
 def normalisation($r):
     ( $r.doc.metrics
       | to_entries[]
@@ -81,10 +92,16 @@ def normalisation($r):
       | law("norm-domain"; $r;
             $m.value == null
             or unitOf($r; $m.key) == "raw"
-            or (($m.value | floor) == $m.value
-                and $m.value >= 0
+            or ($m.value >= 0
                 and (unitOf($r; $m.key) != "percent" or $m.value <= 100));
-            {metric: $m.key, unit: unitOf($r; $m.key), value: $m.value}) )
+            {metric: $m.key, unit: unitOf($r; $m.key), value: $m.value})
+      , law("norm-integral"; $r;
+            $m.value == null
+            or unitOf($r; $m.key) == "raw"
+            or (truncatesOf($r; $m.key) | not)
+            or ($m.value | floor) == $m.value;
+            {metric: $m.key, unit: unitOf($r; $m.key), value: $m.value,
+             truncates: truncatesOf($r; $m.key)}) )
   , law("pct-range"; $r;
         $r.doc.percentage == null
         or ($r.doc.percentage >= 0 and $r.doc.percentage <= 100);

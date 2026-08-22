@@ -20,6 +20,11 @@
   # "required percentOf metric" unrepresentable downstream (D-11).
   isDerived = m: m.from ? percentOf;
 
+  # `floor` is emitted only when it is false. Absent means "truncate", which is
+  # the overwhelmingly common case, so writing `"floor": true` onto every metric
+  # would add a line of noise per metric and move three golden files without
+  # changing any behaviour. Omitting the default follows `stripNull` dropping a
+  # null `nullText` and `required` being absent for a derived metric.
   renderMetric = _name: m:
     stripNull ({
         inherit (m) from unit;
@@ -27,6 +32,9 @@
       }
       // lib.optionalAttrs (!isDerived m) {
         inherit (m) required;
+      }
+      // lib.optionalAttrs (!(m.floor or true)) {
+        floor = false;
       });
 
   # Enabled extras merge into the provider's metrics here, in the pure builder,

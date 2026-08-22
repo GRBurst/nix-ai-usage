@@ -1,0 +1,51 @@
+{
+  "enable": true,
+  "format": "{usage}/{limit}",
+  "maxStaleAge": 900,
+  "metrics": {
+    "limit": {
+      "from": {
+        "path": ["data", "limit"]
+      },
+      "nullText": "∞",
+      "required": false,
+      "unit": "dollars"
+    },
+    "remaining": {
+      "floor": false,
+      "from": {
+        "path": ["data", "limit_remaining"]
+      },
+      "nullText": "∞",
+      "required": false,
+      "unit": "dollars"
+    },
+    "usage": {
+      "from": {
+        "path": ["data", "usage"]
+      },
+      "required": true,
+      "unit": "dollars"
+    }
+  },
+  "name": "openrouter",
+  "refreshInterval": 300,
+  "retryInterval": 60,
+  "rules": [
+    {
+      "criticalAt": 1,
+      "metric": "remaining",
+      "warnAt": 5
+    }
+  ],
+  "source": {
+    "http": {
+      "headers": {
+        "Authorization": "Bearer {credential}"
+      },
+      "url": "https://openrouter.ai/api/v1/key"
+    }
+  },
+  "timeout": 3,
+  "tooltipFormat": "used {usage} of {limit} · {remaining} left"
+}

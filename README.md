@@ -113,6 +113,20 @@ one adds keys to `metrics` and cannot change `text`, `tooltip`, `severity` or
 `percentage`. That is checked over every subset of every shipped provider's
 extras, not just asserted here.
 
+Numbers in `metrics` are truncated to whole units by default, because a bar has
+room for `77%` and not `77.9924129335%`. Set `floor = false` on a metric when
+your adapter wants the provider's own precision:
+
+```nix
+programs.aiUsage.providers.openrouter.metrics.usage.floor = false;
+```
+
+`metrics` then carries `155.984825867` rather than `155`. It is per metric, so a
+truncated `limit` can sit beside a full-precision `usage` in one document. Two
+consequences worth knowing: the rendered `text` becomes whatever the provider
+wrote, so a payload sending `91.0` renders `91.0%`; and a *descending* rule fires
+later, since `floor 5.5 <= 5` holds where `5.5 <= 5` does not.
+
 `programs.aiUsage.settings` exposes the rendered config document read-only, so
 your own tests can assert on what the module produced.
 

@@ -70,7 +70,7 @@ result.
       "maxStaleAge": 900,
       "source": { "http": { "url": "...", "headers": { "...": "..." } } },
       "credential": { "secretTool": { "service": "...", "account": "..." } },
-      "metrics": { "<metric>": { "from": {...}, "unit": "...", "required": true, "nullText": "..." } },
+      "metrics": { "<metric>": { "from": {...}, "unit": "...", "required": true, "nullText": "...", "floor": false } },
       "rules": [ { "metric": "<metric>", "warnAt": 80, "criticalAt": 90 } ],
       "format": "{metric}",
       "tooltipFormat": "{metric}"
@@ -83,7 +83,9 @@ result.
 (`lib.types.attrTag`), so `{path = ...; expression = ...;}` is unrepresentable
 rather than merely undefined. `credential` and `tooltipFormat` are omitted
 entirely when null; `nullText` likewise; `required` is omitted for `percentOf`
-metrics, which are never required.
+metrics, which are never required; and `floor` is omitted when true, so an
+absent `floor` means "truncate". Only the opt-out is written down, which is why
+adding the flag moved no golden file.
 
 Attribute keys are emitted lexicographically by `builtins.toJSON`, which is what
 fixes the rendering order of `metrics` in the document.
@@ -140,11 +142,38 @@ container or absent — and `checks/laws` states that as `timestamp-total`.
 
 ### `metrics.<name>.unit`
 
-| Unit | Normalisation | Rendering |
+| Unit | Clamp | Rendering |
 | --- | --- | --- |
-| `percent` | clamp to `0..100`, then floor | bare number |
-| `dollars` | clamp at `0`, then floor | `$` prefix |
+| `percent` | to `0..100` | bare number |
+| `dollars` | at `0` | `$` prefix |
 | `raw` | none | bare value |
+
+`unit` owns clamping and rendering. Truncation to a whole number is a separate
+per-metric concern, `metrics.<name>.floor`, which defaults to `true` and is
+ignored for `raw`.
+
+### `metrics.<name>.floor`
+
+On by default: a status bar has room for `77%` and not `77.9924129335%`, so the
+document carries the number a bar can show. Set it `false` when an adapter needs
+the provider's own precision — summing currency, drawing a graph — and
+`44.01517413299999` then survives into `metrics` instead of collapsing to `44`.
+It is per metric, not per provider, so one document can carry a truncated
+`limit` beside a full-precision `usage`.
+
+Two consequences, both measured rather than assumed:
+
+- **The rendered form becomes the provider's.** jq reproduces the literal text of
+  a number it has not computed on, and Anthropic sends `"utilization": 91.0`, so
+  an unfloored percent renders `91.0%`. A small computed value can appear in
+  exponent form, such as `1e-06`. A *computed* whole number renders without a
+  `.0` suffix, so `limit - limit_remaining` of `20` still renders `$20`.
+- **A descending rule fires later.** `floor 5.5 <= 5` holds where `5.5 <= 5` does
+  not, so with `warnAt = 5` a remaining balance of `5.5` warns when truncated and
+  does not when it is not. An ascending rule with whole thresholds is unaffected,
+  because `floor v >= T` and `v >= T` agree when `T` is whole. `checks/core`
+  pins both halves of that divergence against one fixture, so it is a recorded
+  decision rather than a latent surprise.
 
 ### `rules`
 
@@ -295,7 +324,11 @@ Pass 3 — normalisation, applied last so that thresholds and percentages are
 computed from the *unrounded* values:
 
 ```
-v(m) = norm(unit(m), v1(m) or v2(m))
+v(m) = norm(unit(m), floor(m), v1(m) or v2(m))
+
+norm(u, f, x) = null                     if x = null
+              = clamp(u, x)              if f = false or u = raw
+              = floor(clamp(u, x))       otherwise
 ```
 
 Severity:
@@ -311,9 +344,11 @@ severity  = unknown   if D = null, or any required m has v(m) = null
 ```
 
 Multiplying before dividing (`of * 100 / total`) preserves precision for small
-dollar amounts. Flooring after clamping means a value of `79.9` is `79` — below a
-`warnAt` of `80` — and that `19.6` dollars against a `20` limit renders `$19/$20`
-rather than a rounded `$20/$20` that would falsely read as exhausted.
+dollar amounts. Truncating after clamping means a value of `79.9` is `79` — below
+a `warnAt` of `80` — and that `19.6` dollars against a `20` limit renders
+`$19/$20` rather than a rounded `$20/$20` that would falsely read as exhausted.
+Truncation is deliberately the last step and is skippable per metric, so a
+`floor = false` metric still gets the clamp its unit promises.
 
 ## Module option reference
 
@@ -489,8 +524,8 @@ Note the descending-threshold form for a "credit remaining" style provider:
 
 | Check | Layer | Pins |
 | --- | --- | --- |
-| `core` | pure core semantics | 41 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, flooring, staleness, `percentage`, metric order, pango safety, timestamp parsing, window-scoped ratios |
-| `laws` | universally quantified properties of the core | 738 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation, the severity lattice, timestamp totality, determinism, extras non-interference over every subset |
+| `core` | pure core semantics | 46 rows over `module/ai-usage.jq`: every semantic rule, thresholds, clamping, truncation and opting out of it, staleness, `percentage`, metric order, pango safety, timestamp parsing, window-scoped ratios |
+| `laws` | universally quantified properties of the core | 795 generated instances over a bounded adversarial domain: document totality, pango safety, normalisation and its per-metric opt-out, the severity lattice, timestamp totality, determinism, extras non-interference over every subset |
 | `config` | pure config builder | golden `expected.json` for the shipped defaults, plus provider filtering, `percentOf` key omission, null stripping, and drift between the golden and the core's fixtures |
 | `runtime` | orchestrator | 20 groups with stub `curl`/`secret-tool`: cold fetch, warm cache with no network, `--refresh`, interval expiry, stale serving, retry throttling, stale expiry, recovery, all three credential kinds, command source, exit codes, atomic writes, concurrency |
 | `module` | Home Manager module | option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions |

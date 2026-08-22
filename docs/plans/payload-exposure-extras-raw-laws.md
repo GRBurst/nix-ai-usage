@@ -1239,3 +1239,74 @@ five_hour.utilization`, `limits[weekly_all].percent == 68 == seven_day.utilizati
 only novel content is one `weekly_scoped` entry at `percent: 0`. It is also the only
 proposed extra needing array aggregation, since `from.path` is `getpath` and therefore
 static. Addable later as pure provider data, zero schema change.
+
+### M4b - per-metric `floor` flag, complete
+
+Not in this plan. It came out of a question asked while reviewing M4's output: does the
+document expose raw numbers, or only rendered strings? The answer was half reassuring.
+`metrics` has always carried bare numbers, never strings -- the `$` prefix lives only in
+`text` and `tooltip`, applied by `show` at render time. But `norm` clamped **and floored**
+before the value reached `metrics`, so `usage: 155.984825867` was published as `155` and an
+adapter could not recover the lost precision from the document.
+
+The fix is a per-metric `floor` option, `types.bool`, default `true`. `unit` keeps owning
+clamping, `floor` owns truncation, and `raw` is exempt from both. Absent means truncate, so
+nothing that existed before the flag moved.
+
+| Step | Verified |
+| ---- | -------- |
+| RED | `checks/core`, exit 1, 9 failures across 3 rows; the fourth row passed by design |
+| GREEN core | 46 rows pass |
+| goldens | all three drift-coupled files: **empty diff** |
+| laws | 795 instances (738 + 57), 0 violations |
+| mutation | reverting to `// true` gives 16 `metrics-expected` violations, all on `unfloored-*` |
+| gate | `nix flake check --keep-going`: six derivations, all passed |
+
+As in M4, **the empty golden diff is the deliverable.** `renderMetric` emits `floor` only
+when it is `false`, so the shipped configuration is byte-identical to what it was before the
+flag existed. Writing `"floor": true` onto fifteen metrics would have moved three golden
+files without changing any behaviour.
+
+Two jq bugs were hit implementing this, both worth remembering.
+
+**`// true` cannot default a boolean.** `{floor: false} | .floor // true` is `true`, so the
+first implementation silently ignored every opt-out. The correct form is
+`if has("floor") then .floor else true end`. The galling part is that the repository had
+already documented this exact trap, in the `isRequired` comment three definitions further
+down the same file, and the implementation walked into it anyway. The lesson is not "read
+the comments"; it is that a law suite catches what a comment cannot -- the mutation above
+reproduces the bug and 16 instances fail immediately.
+
+**A parameter named `floor` shadows the `floor` builtin.** With `def norm($unit; $floor)`,
+the `then floor` branch returned the *flag* rather than truncating the value. The symptom
+was `text expected '12%·34%', got 'true%·true%'` across roughly twenty rows. The parameter
+is now `$truncate`, with a comment saying why so it is not reintroduced.
+
+The flag is not severity-neutral, and that is recorded rather than hidden. For an
+**ascending** rule with whole thresholds nothing moves, because `floor v >= T` and `v >= T`
+agree when `T` is whole. For a **descending** rule the alarm fires *later*: `floor 5.5 <= 5`
+holds where `5.5 <= 5` does not. `checks/core` pins both halves against one fixture --
+`openrouter-remaining-floored-warns-at-the-boundary` expects `warn`,
+`openrouter-remaining-precise-stays-ok` expects `ok`, the configs differ only in `floor` --
+so the divergence is a decision on the record instead of a bug found later.
+
+Turning the floor off surrenders the rendered form to the provider. jq reproduces the
+literal text of a number it has not computed on, and Anthropic sends `"utilization": 91.0`,
+so an unfloored percent renders `91.0%`. A *computed* whole number is unaffected
+(`200 - 180` renders `20`, not `20.0`), and very small computed values can appear as
+`1e-06`. All three were measured, not assumed.
+
+One earlier note in this log was wrong and is corrected here: `200 - 44.01517413299999` is
+exactly `155.984825867`, and `155.984825867 * 100 / 200` is exactly `77.9924129335`. The
+`...00001` values recorded during the M3 precondition work do not occur. This also
+re-confirms that on the real capture `windowUsage` equals `usage` exactly, which is why that
+payload cannot discriminate the D-23 fix.
+
+New `checks/core` assets, all additive: configs `openrouter-precise.json` (ascending rule,
+`floor = false` on four metrics with `limit` left truncating, so one document shows both
+behaviours) and `openrouter-remaining-precise.json` (descending rule, `floor = false` on
+`remaining` only), plus fixture `or-remaining-fraction.json` carrying the `5.5` witness.
+`checks/laws` gained `familyUnfloored`, 57 instances pinning `expect.metrics` to the clamp
+without truncation -- the pin is the teeth, since `norm-integral` is deliberately silent on
+those instances and a family without a pinned expectation would pass against a core that
+ignored the flag.

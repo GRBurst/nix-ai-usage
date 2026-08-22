@@ -421,6 +421,65 @@
       severity = "ok";
       text = "$7/$20";
     }
+    # ------------------------------------- `floor = false` keeps the precision
+    #
+    # `unit` owns clamping, `floor` owns truncation. Here four metrics opt out
+    # and `limit` does not, so one document shows both behaviours: the provider's
+    # own `155.984825867` survives while `limit` still reads `200`. The point is
+    # an adapter that needs real numbers -- a graph, a currency total -- rather
+    # than the two or three characters a bar can show.
+    {
+      name = "openrouter-precise-keeps-full-precision";
+      config = "openrouter-precise.json";
+      provider = "openrouter";
+      body = "or-window-real.json";
+      severity = "ok";
+      text = "$155.984825867/$200";
+      extra = [
+        ".metrics.usage == 155.984825867"
+        ".metrics.remaining == 44.01517413299999"
+        ".metrics.windowUsage == 155.984825867"
+        ".metrics.percent == 77.9924129335"
+        # Not opted out, so still truncated. Per-metric, not per-provider.
+        ".metrics.limit == 200"
+      ];
+    }
+    # `percentage` is read straight from the percent-unit rule metric, so it
+    # carries the same precision. Bars accept a fractional percentage; the ones
+    # that do not were already rounding it.
+    {
+      name = "openrouter-precise-percentage-is-fractional";
+      config = "openrouter-precise.json";
+      provider = "openrouter";
+      body = "or-window-real.json";
+      severity = "ok";
+      text = "$155.984825867/$200";
+      extra = [".percentage == 77.9924129335"];
+    }
+    # A descending rule is the one place the flag moves severity, and it does so
+    # in the safe direction: `floor 5.5 <= 5` fires, `5.5 <= 5` does not, so the
+    # alarm comes later rather than earlier. The two rows below share a fixture
+    # and differ only in `floor`, which is the record that this is deliberate.
+    # An ascending rule with whole thresholds is unaffected, since `floor v >= T`
+    # and `v >= T` agree when `T` is whole.
+    {
+      name = "openrouter-remaining-floored-warns-at-the-boundary";
+      config = "openrouter-remaining.json";
+      provider = "openrouter";
+      body = "or-remaining-fraction.json";
+      severity = "warn";
+      text = "$14/$20";
+      extra = [".metrics.remaining == 5"];
+    }
+    {
+      name = "openrouter-remaining-precise-stays-ok";
+      config = "openrouter-remaining-precise.json";
+      provider = "openrouter";
+      body = "or-remaining-fraction.json";
+      severity = "ok";
+      text = "$14/$20";
+      extra = [".metrics.remaining == 5.5"];
+    }
     {
       name = "openrouter-remaining-nulltext";
       config = "openrouter.json";
