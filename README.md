@@ -84,7 +84,7 @@ programs.aiUsage = {
 
   providers.openrouter.enable = false;
 
-  # a provider with no usage endpoint, so the body is produced locally
+  # a custom provider with a local JSON file
   providers.local = {
     source.command = "cat ~/.local/state/spend.json";
     metrics = {
@@ -98,10 +98,42 @@ programs.aiUsage = {
 };
 ```
 
-Reading the `local` provider from the top: it runs a shell command instead of an
-HTTP request, sums the cost of every entry in the resulting JSON into `spent`,
-reads `budget` straight out of the body, derives `percent` from those two, warns
-at 80 percent, and displays the two dollar amounts side by side.
+Reading the `local` provider from the top: it runs a shell command, sums the cost
+of every entry in the JSON output into `spent`, reads `budget` from the body,
+derives `percent` from those two, warns at 80%, and displays both values.
+
+### Adding a custom provider
+
+Any provider that exposes usage as JSON can be queried. A minimal HTTP provider
+needs an endpoint, credentials, and metric extraction rules:
+
+```nix
+providers.myservice = {
+  source.http = {
+    url = "https://api.example.com/v1/usage";
+    headers."Authorization" = "Bearer {credential}";
+  };
+
+  credential.file = {
+    path = "~/.config/myservice/token.json";
+    jqPath = ".api_key";
+  };
+
+  metrics = {
+    used = {from.path = ["usage"]; unit = "dollars";};
+    limit = {from.path = ["quota"]; unit = "dollars";};
+  };
+
+  rules = [{metric = "used"; warnAt = 80; criticalAt = 95;}];
+  format = "{used}/{limit}";
+};
+```
+
+Credentials can also come from a keyring (`credential.secretTool`), a shell command
+(`credential.command`), or a local file with jq extraction (`credential.file`).
+Metrics can be extracted from nested paths (`from.path`), derived from other
+metrics (`from.percentOf`), read as timestamps (`from.timestamp`), or computed
+with jq expressions (`from.expression`).
 
 A provider declares five things. It declares where its numbers come from, either
 `source.http` or `source.command`. It declares how to authenticate, using one of
