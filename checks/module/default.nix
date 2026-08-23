@@ -28,8 +28,8 @@
   aiLib = import ../../lib {inherit lib;};
 
   # The complete Home Manager surface this module touches. `home.homeDirectory`
-  # is the module's only host-derived read; `home.packages` and `assertions` are
-  # the only things it writes.
+  # is the module's only host-derived read, and `home.packages` and `assertions`
+  # are the only things it writes.
   stubHome = {lib, ...}: {
     options = {
       home.homeDirectory = lib.mkOption {
@@ -84,7 +84,7 @@
       programs.aiUsage.providers = lib.recursiveUpdate defaults overlay;
     };
 
-  # M2 -- `from.timestamp` is a new arm of the extraction union (D-20). Two
+  # M2. `from.timestamp` is a new arm of the extraction union (D-20). Two
   # properties need proving at this layer: the arm is accepted and reaches
   # `settings`, and `attrTag` still makes the union exclusive (D-4). The second
   # is why no assertion rejects a double tag: it is a *type* error, and a type
@@ -260,7 +260,7 @@
       message = "a metric carrying both path and timestamp must be a type error, not a rendered config";
     }
 
-    # ---- negative: each assertion fires on a overlaid configuration ----
+    # ---- negative: each assertion fires on an overlaid configuration ----
     {
       name = "A1-rule-references-unknown-metric";
       condition = firesWith vA1 "rule references unknown metric 'nope'";

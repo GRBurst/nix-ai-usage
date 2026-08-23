@@ -3,7 +3,7 @@
 ## Meta Information
 
 Project: `ai-usage`
-Purpose: A declarative AI provider usage/quota query layer — a Home Manager module plus the `ai-usage` CLI, which emits a bar-agnostic JSON document. Ships `claude` and `openrouter` providers; adding a provider is data, not code.
+Purpose: A declarative query layer for AI provider usage and quota. It is a Home Manager module plus the `ai-usage` CLI, which emits a bar-agnostic JSON document. It ships the `claude` and `openrouter` providers, and adding a provider is data rather than code.
 Repository Type: Standalone Nix flake (`github:GRBurst/nix-ai-usage`). No hosts, no system configuration.
 Primary Language: Nix, with a pure jq core and a POSIX shell orchestrator.
 Role: Expert Nix/Home Manager engineer. Prioritize reproducibility, small correct changes, strict purity layering, explicit option boundaries, and schema stability.
@@ -27,13 +27,13 @@ Use `nix fmt` or the exported formatter, Alejandra, for Nix formatting. Keep `fl
 
 ## Git And Flake References
 
-This is an ordinary standalone Git repository with an `origin` remote; plain `git` works here. There is no dotfiles wrapper and no enclosing worktree.
+This is an ordinary standalone Git repository with an `origin` remote, so plain `git` works here. There is no dotfiles wrapper and no enclosing worktree.
 
-For Nix commands, explicit `path:$HOME/projects/nix/ai-usage` flake references avoid accidental Git-tree filtering of uncommitted files and are the safest default while iterating: a plain `.#` reference evaluates the Git tree, so a new untracked fixture or check file will not be visible to the build.
+For Nix commands, explicit `path:$HOME/projects/nix/ai-usage` flake references avoid accidental Git-tree filtering of uncommitted files and are the safest default while iterating. The reason is that a plain `.#` reference evaluates the Git tree, so a new untracked fixture or check file will not be visible to the build.
 
 ## Agent Sandbox (nono)
 
-Agent sessions may run inside a `nono` sandbox, which enforces filesystem and network limits at the OS level (Landlock). Denials surface as `Operation not permitted`, `Permission denied`, `EACCES`, or `EPERM` on paths that look perfectly normal. These are kernel-enforced capability boundaries, not Unix file permissions: never respond with `sudo`, `chmod`, `chown`, or by retrying the same access through a different path.
+Agent sessions may run inside a `nono` sandbox, which enforces filesystem and network limits at the OS level (Landlock). Denials surface as `Operation not permitted`, `Permission denied`, `EACCES`, or `EPERM` on paths that look perfectly normal. These are kernel-enforced capability boundaries rather than Unix file permissions, so never respond with `sudo`, `chmod`, `chown`, or by retrying the same access through a different path.
 
 Diagnose a denial instead of guessing:
 
@@ -58,8 +58,8 @@ nix build path:$HOME/projects/nix/ai-usage#formatter.x86_64-linux \
 # then: <out>/bin/alejandra <changed .nix files>
 ```
 
-- Redirecting `XDG_CACHE_HOME` also relocates the `ai-usage` runtime cache (`$XDG_CACHE_HOME/ai-usage/`). Keep that in mind when manually validating cache behaviour; the real user cache is elsewhere.
-- Network egress to provider endpoints (`api.anthropic.com`, `openrouter.ai`) is generally not granted. Do not attempt live provider calls to "verify" behaviour; use `checks/runtime`, which stubs `curl` and `secret-tool`.
+- Redirecting `XDG_CACHE_HOME` also relocates the `ai-usage` runtime cache (`$XDG_CACHE_HOME/ai-usage/`). Keep that in mind when manually validating cache behaviour, because the real user cache is elsewhere.
+- Network egress to provider endpoints (`api.anthropic.com`, `openrouter.ai`) is generally not granted. Do not attempt live provider calls to "verify" behaviour. Use `checks/runtime` instead, which stubs `curl` and `secret-tool`.
 
 If a task genuinely requires a path or host that is not granted, say so and stop rather than working around the sandbox.
 
@@ -69,27 +69,27 @@ Primary dev environment is Nix. Do not suggest `apt`, `brew`, or ad hoc package 
 
 This flake has exactly **one** input: `nixpkgs` (`nixos-unstable`), pinned in `flake.lock`.
 
-AGENT RULE: Do not add flake inputs. In particular, do not add `home-manager` to test the module — `checks/module` evaluates it with `lib.evalModules` against a ~20-line stub of the three Home Manager options the module touches (`home.homeDirectory`, `home.packages`, `assertions`). That is a deliberate tradeoff: single input, fast evaluation, at the cost of stub drift which consumers surface downstream. Adding an input to remove the stub is a change of direction, not a fix; ask first.
+AGENT RULE: Do not add flake inputs. In particular, do not add `home-manager` to test the module. Instead, `checks/module` evaluates it with `lib.evalModules` against a stub of about twenty lines covering the three Home Manager options the module touches, which are `home.homeDirectory`, `home.packages` and `assertions`. That is a deliberate tradeoff of a single input and fast evaluation, at the cost of stub drift which consumers surface downstream. Adding an input to remove the stub is a change of direction rather than a fix, so ask first.
 
 This flake's own `nixpkgs` serves only its checks and formatter. The module builds the package with `pkgs.callPackage`, so consumers get the binary from _their_ nixpkgs regardless of `inputs.nixpkgs.follows`.
 
 ## Workspace Structure
 
-`flake.nix`: flake entrypoint — single `nixpkgs` input, `homeModules`, five `checks`, and the Alejandra `formatter`.
-`flake.lock`: pinned input graph; do not update casually.
-`lib/default.nix`: pure config builder. `mkConfig` (option tree → schema-v1 config document) and `providerDefaults` (the shipped `claude` and `openrouter` registry). Takes `lib` plus an explicit `homeDirectory`; nothing else.
-`module/default.nix`: the Home Manager module. Declares `programs.aiUsage`, the tagged-union option types, and the nine assertions. The only file permitted to read `config.*`.
-`module/package.nix`: the `ai-usage` derivation — imperative shell orchestrator (argument parsing, credential resolution, HTTP fetch, `flock`ed cache, expression pre-evaluation). Receives the config as a `configFile` path.
-`module/ai-usage.jq`: the pure functional core — response body plus config to the bar-agnostic document. ~120 lines.
+`flake.nix`: flake entrypoint holding the single `nixpkgs` input, `homeModules`, five `checks`, and the Alejandra `formatter`.
+`flake.lock`: pinned input graph. Do not update casually.
+`lib/default.nix`: pure config builder. `mkConfig` turns the option tree into a schema-v1 config document, and `providerDefaults` is the shipped `claude` and `openrouter` registry. It takes `lib` plus an explicit `homeDirectory` and nothing else.
+`module/default.nix`: the Home Manager module. Declares `programs.aiUsage`, the tagged-union option types, and the eleven assertions. The only file permitted to read `config.*`.
+`module/package.nix`: the `ai-usage` derivation. This is the imperative shell orchestrator, covering argument parsing, credential resolution, HTTP fetch, the `flock`ed cache, and expression pre-evaluation. It receives the config as a `configFile` path.
+`module/ai-usage.jq`: the pure functional core, mapping a response body plus a config to the bar-agnostic document in roughly 120 lines.
 `checks/core/`: pure core semantics over `module/ai-usage.jq`, driven by hand-written `configs/*.json` and recorded `fixtures/*.json`.
 `checks/laws/`: universally quantified properties of the same core, over instances generated in Nix (`default.nix`), executed one-per-instance by `run-instance.sh`, and verified in pure jq (`laws.jq`). Bounded-exhaustive, no randomness, reports every violation.
 `checks/config/`: golden test pinning `mkConfig` output against `expected.json`, plus drift detection against `checks/core/configs`.
-`checks/runtime/`: orchestrator behaviour against stub `curl`/`secret-tool` — caching, staleness, throttling, credentials, exit codes, concurrency.
+`checks/runtime/`: orchestrator behaviour against a stub `curl` and a stub `secret-tool`, covering caching, staleness, throttling, credentials, exit codes and concurrency.
 `checks/module/`: option shape, `settings` contents, package installation, and a violating configuration for each of the eleven assertions.
 `tools/regenerate-goldens.sh`: the only sanctioned way to re-cut the three drift-coupled golden files. `tools/json-fmt.jq` is the formatter it pipes through, and reproduces the checked-in style byte-identically.
-`README.md`: the user-facing surface — install, configure, wire a bar, output contract.
-`docs/architecture.md`: authoritative reference — purity layering, config/document/cache schemas, three-pass resolution semantics, module option reference, assertion register, check layers, decision register (`D-N`), deliberately-unused payload fields, planned extension points.
-`docs/plans/`: implementation plans for accepted-but-unimplemented work. Plans, not current behaviour. Section 10 of each plan is its implementation log: what was verified, and where the plan turned out to be wrong.
+`README.md`: the user-facing surface, which is how to install, how to configure, how to wire a bar, and the output contract.
+`docs/architecture.md`: authoritative reference for purity layering, the config, document and cache schemas, three-pass resolution semantics, the module option reference, the assertion register, the check layers, the decision register (`D-N`), deliberately-unused payload fields and planned extension points.
+`docs/plans/`: implementation plans for accepted-but-unimplemented work. These are plans rather than current behaviour. Section 10 of each plan is its implementation log, recording what was verified and where the plan turned out to be wrong.
 `claude_payload.json`, `openrouter_payload.json`: gitignored scratch captures of real provider responses at the repository root. Not test data and not implementation sources.
 
 ## Change Routing
@@ -97,7 +97,7 @@ This flake's own `nixpkgs` serves only its checks and formatter. The module buil
 For provider defaults (endpoints, headers, credential locations, thresholds, templates) or the rendered config schema, start in `lib/default.nix`, then re-cut the goldens with `./tools/regenerate-goldens.sh`.
 For option types, option documentation, or evaluation-time invariants, start in `module/default.nix`.
 For fetching, caching, credentials, staleness, CLI flags, or exit codes, start in `module/package.nix`.
-For document semantics — metric extraction, normalisation, severity, rendering — start in `module/ai-usage.jq`.
+For document semantics, meaning metric extraction, normalisation, severity and rendering, start in `module/ai-usage.jq`.
 For test coverage, start in the one check layer that owns the behaviour (see the ownership table under Test-Driven Development).
 For architecture context, read `docs/architecture.md` before making broad changes.
 
@@ -107,7 +107,7 @@ Use a strict Red-Green-Refactor loop for feature work and bug fixes.
 
 AGENT RULE: When adding a feature or fixing a bug, output the failing check/fixture/assertion change before outputting implementation code.
 
-Each layer owns exactly one thing. Put a test where its owner lives; do not duplicate an invariant across layers.
+Each layer owns exactly one thing. Put a test where its owner lives, and do not duplicate an invariant across layers.
 
 | Check     | Owns                                               | Add a case here when changing                                                                                              |
 | --------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -119,15 +119,15 @@ Each layer owns exactly one thing. Put a test where its owner lives; do not dupl
 
 `checks/config/expected.json` is the single place the shipped defaults are pinned. Changing a default means re-cutting the golden file deliberately, in the same change, with the reason stated. Do not weaken the golden diff to make a change pass.
 
-Three files move together and must be re-cut in one step with `./tools/regenerate-goldens.sh`: `checks/config/expected.json`, `checks/core/configs/claude.json` and `checks/core/configs/openrouter.json`. `checks/config` asserts the latter two equal the shipped defaults, so editing `lib/default.nix` without regenerating fails the drift check. Never hand-edit a golden and never adjust one to match the code — the `git diff` is the review artefact.
+Three files move together and must be re-cut in one step with `./tools/regenerate-goldens.sh`: `checks/config/expected.json`, `checks/core/configs/claude.json` and `checks/core/configs/openrouter.json`. `checks/config` asserts the latter two equal the shipped defaults, so editing `lib/default.nix` without regenerating fails the drift check. Never hand-edit a golden and never adjust one to match the code, because the `git diff` is the review artefact.
 
-Assertions are testable in both directions: in the module system they are _data_ (`{assertion, message}`), not exceptions. A new assertion is incomplete without a violating configuration in `checks/module` proving it actually fires.
+Assertions are testable in both directions, because in the module system they are _data_ of the form `{assertion, message}` rather than exceptions. A new assertion is incomplete without a violating configuration in `checks/module` proving it actually fires.
 
 Keep `docs/architecture.md` and `README.md` in sync when changing schemas, semantics, or user-visible behaviour.
 
 ## Nix Module Patterns
 
-The public namespace is `programs.aiUsage`. It is the only namespace this repository owns; do not introduce a second one.
+The public namespace is `programs.aiUsage`. It is the only namespace this repository owns, so do not introduce a second one.
 
 Follow existing module shape:
 
@@ -140,10 +140,10 @@ Follow existing module shape:
 
 Repository-specific type conventions:
 
-- Use `lib.types.attrTag` for "one of these kinds" fields (`source`, `credential`, `metrics.<name>.from`), so `{path = ...; expression = ...;}` is unrepresentable rather than merely undefined.
+- Use `lib.types.attrTag` for "one of these kinds" fields (`source`, `credential`, `metrics.<name>.from`), so a value carrying both `path` and `expression` is unrepresentable rather than merely undefined.
 - Derived, non-configurable outputs (`package`, `configFile`, `settings`) are `readOnly` options with a `default`. Consumers depend on those rather than on a package name or a re-derivation of the config.
-- `settings` is typed `attrs` on purpose: its shape is pinned by the `checks/config` golden diff, and a `submodule` re-encoding would be a second owner of the same invariant.
-- Every option carries a `description`; non-obvious defaults carry `defaultText`.
+- `settings` is typed `attrs` on purpose. Its shape is pinned by the `checks/config` golden diff, and a `submodule` re-encoding would be a second owner of the same invariant.
+- Every option carries a `description`, and non-obvious defaults carry `defaultText`.
 - New evaluation-time invariants belong in the assertion list, numbered and commented (`# A10`), with a matching violating configuration in `checks/module`.
 
 ## Architectural Patterns
@@ -155,15 +155,15 @@ This is the load-bearing constraint of the repository. Four artefacts with delib
 | Artefact             | May read                    | Why                                                                                      |
 | -------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
 | `lib/default.nix`    | `lib` only                  | pure data transformation, unit-testable without a host                                   |
-| `module/ai-usage.jq` | its jq arguments            | pure function; every semantic rule testable against a fixture                            |
-| `module/package.nix` | its `callPackage` arguments | ordinary derivation; config arrives as a _file path_, so the package never sees `config` |
-| `module/default.nix` | `config.*`                  | the only file allowed to; wires the three above together                                 |
+| `module/ai-usage.jq` | its jq arguments            | pure function, so every semantic rule is testable against a fixture                      |
+| `module/package.nix` | its `callPackage` arguments | ordinary derivation, and the config arrives as a _file path_, so the package never sees `config` |
+| `module/default.nix` | `config.*`                  | the only file allowed to, and it wires the three above together                          |
 
 AGENT RULE: `lib/default.nix`, `module/package.nix` and `module/ai-usage.jq` must never mention `config`, `osConfig`, `home-manager`, or any host state. If a value is host-derived, thread it through explicitly (as `homeDirectory` is) rather than reaching for `config`.
 
 ### Functional core, imperative shell
 
-Impure work lives in the orchestrator; semantics live in the pure core.
+Impure work lives in the orchestrator, and semantics live in the pure core.
 
 - The shell performs I/O: credential resolution, HTTP, cache reads/writes, locking, clock reads, and jq `expression` pre-evaluation.
 - The jq core is a total, time-free function of its arguments. It receives pre-computed expression values rather than evaluating filters itself, so a malformed user filter cannot corrupt the document.
@@ -175,13 +175,13 @@ Do not move time, network, or filesystem access into the core to simplify a call
 
 This repository owns **acquisition and policy**: which providers exist, where their numbers come from, how credentials resolve, and which thresholds map a number onto a severity.
 
-It owns **no presentation**. Bar translation is deliberately out of scope: `ai-usage <provider>` emits one bar-agnostic document and a consumer adapts it in a small `jq` adapter it owns. Do not add a waybar/polybar/i3status module, an `icon` field, or any bar-specific wire format here. The document already carries `tooltip`, `percentage` and `stale`, which is more than most bars need.
+It owns **no presentation**. Bar translation is deliberately out of scope, so `ai-usage <provider>` emits one bar-agnostic document and a consumer adapts it in a small `jq` adapter it owns. Do not add a waybar/polybar/i3status module, an `icon` field, or any bar-specific wire format here. The document already carries `tooltip`, `percentage` and `stale`, which is more than most bars need.
 
 ### Contract stability
 
-Three versioned schemas are public: config (v1), document (v1), cache (v1). Consumers' adapters and tests read the document; the CLI surface (`<provider> [--refresh] [--config <path>]`, `$AI_USAGE_CONFIG`, exit codes `0`/`1`/`2`) is equally public.
+Three versioned schemas are public, which are config (v1), document (v1) and cache (v1). Consumers' adapters and tests read the document, and the CLI surface is equally public. That surface is `<provider> [--refresh] [--config <path>]`, the `$AI_USAGE_CONFIG` variable, and the exit codes `0`, `1` and `2`.
 
-Additive changes are cheap; breaking ones are not. A field removal, a rename, a severity-lattice change, or an exit-code change requires a version bump and an explicit migration note, not a silent edit. Prefer designing new capability as new data in the config schema.
+Additive changes are cheap and breaking ones are not. A field removal, a rename, a severity-lattice change, or an exit-code change requires a version bump and an explicit migration note rather than a silent edit. Prefer designing new capability as new data in the config schema.
 
 ## Safety
 
@@ -189,29 +189,29 @@ The `ai-usage` CLI must always exit `0` on a normal run and always print exactly
 
 Credentials are not managed by this repository and must never enter the Nix store. The `{credential}` token in a header value is substituted at runtime, in the shell. Do not interpolate a secret in Nix, do not log a credential, and do not echo a resolved credential for debugging.
 
-Do not commit real provider responses containing account identifiers, balances, or tokens. `claude_payload.json` and `openrouter_payload.json` are untracked scratch; if a fixture is needed, mint a redacted one under `checks/core/fixtures/`.
+Do not commit real provider responses containing account identifiers, balances, or tokens. `claude_payload.json` and `openrouter_payload.json` are untracked scratch. If a fixture is needed, mint a redacted one under `checks/core/fixtures/`.
 
 Do not weaken the pango-safety invariant. Bars that render markup commonly do not escape it, so `<`, `>` and `&` must not reach `text` or `tooltip`.
 
-Cache writes must stay atomic (`.tmp` + `mv`) and serialised (`flock`). Several bar blocks poll concurrently; a torn cache file is a user-visible failure.
+Cache writes must stay atomic (`.tmp` + `mv`) and serialised (`flock`). Several bar blocks poll concurrently, so a torn cache file is a user-visible failure.
 
-The Anthropic utilisation endpoint is undocumented and may change or disappear without notice. Treat graceful degradation as a requirement, not a nicety.
+The Anthropic utilisation endpoint is undocumented and may change or disappear without notice. Treat graceful degradation as a requirement rather than a nicety.
 
 ## Shell Scripts In Nix
 
 Generated scripts should be strict and dependency-explicit:
 
 - Use `pkgs.writeShellApplication`.
-- Put every runtime dependency in `runtimeInputs`; avoid relying on ambient host packages.
+- Put every runtime dependency in `runtimeInputs`, and avoid relying on ambient host packages.
 - Keep the orchestrator POSIX-compatible in style, as it is today (`[ ... ]`, `case`, no bashisms where avoidable).
-- Use Nix interpolation carefully inside shell strings; `''${...}` escapes a shell expansion and preserving that convention matters.
+- Use Nix interpolation carefully inside shell strings. `''${...}` escapes a shell expansion, and preserving that convention matters.
 - Prefer `jq` for JSON parsing instead of ad hoc text parsing.
 
 ## Observability And Errors
 
-Write actionable errors to stderr; stdout is reserved for the document.
+Write actionable errors to stderr, because stdout is reserved for the document.
 
-Failure classification is part of the contract: a fetch failure (unreadable credential file, locked keyring, dead endpoint, unparsable body) degrades the document and keeps exit `0`. Exit `1` is a config error (missing config, wrong schema version). Exit `2` is a usage error (no provider, unknown provider, disabled provider, extra argument, unknown flag).
+Failure classification is part of the contract. A fetch failure, whether that is an unreadable credential file, a locked keyring, a dead endpoint or an unparsable body, degrades the document and keeps exit `0`. Exit `1` is a config error (missing config, wrong schema version). Exit `2` is a usage error (no provider, unknown provider, disabled provider, extra argument, unknown flag).
 
 Avoid `echo` or `printf` debug noise in the orchestrator or generated config. Every line on stdout or stderr is either the document, a user-facing usage message, or actionable error context.
 
@@ -236,20 +236,20 @@ Add or update the owning check layer with every behaviour change.
 Use typed options and assertions for invariants instead of implicit assumptions.
 Keep the cache path and config path stable unless coordinating a migration.
 Avoid unrelated flake input updates and lockfile churn.
-Preserve the existing comment style: files and non-obvious decisions carry a short rationale comment explaining _why_, often citing a decision or assertion identifier. Match it; do not strip it.
+Preserve the existing comment style: files and non-obvious decisions carry a short rationale comment explaining _why_, often citing a decision or assertion identifier. Match it, and do not strip it.
 Skip generic explanations when repo-specific facts are available.
 
 ## Known State And Caveats
 
-Systems are `x86_64-linux` and `aarch64-linux`; there is no host configuration in this repository and nothing to `nixos-rebuild`.
+Systems are `x86_64-linux` and `aarch64-linux`. There is no host configuration in this repository and nothing to `nixos-rebuild`.
 
-Two shipped providers: `claude` (Anthropic utilisation, credential from `~/.claude/.credentials.json`) and `openrouter` (credit balance, credential from the libsecret keyring under service `openrouter_usage`, account `status_bar`). Both runtime dependencies are unenforced by Nix and degrade the corresponding provider when absent.
+There are two shipped providers. `claude` reads Anthropic utilisation with a credential from `~/.claude/.credentials.json`, and `openrouter` reads the credit balance with a credential from the libsecret keyring under service `openrouter_usage` and account `status_bar`. Both runtime dependencies are unenforced by Nix and degrade the corresponding provider when absent.
 
 Eleven module assertions, `A1`..`A11`, are numbered in comments in `module/default.nix` and tabulated in `docs/architecture.md`. `A10` and `A11` police extras: no extra may shadow a base metric, and no two extras of one provider may collide.
 
 Design decisions are cited as `D-N` in code comments, and the register now lives in `docs/architecture.md` § Decision register. Read it before citing a number. It is explicit about its own provenance: `D-20`..`D-28` are recorded from written rationale, `D-3`..`D-19` are reconstructed from their citation sites, `D-1`/`D-2`/`D-7`/`D-8`/`D-9`/`D-12`/`D-14`/`D-15`/`D-16`/`D-18` are cited nowhere and their meanings are unrecoverable, and `D-3` is cited at two sites with two different meanings. **Do not reuse an unrecoverable number and do not renumber an existing citation.** The next decision to record is `D-29`, and recording it means adding a row to that table in the same change.
 
-`docs/plans/payload-exposure-extras-raw-laws.md` is **fully implemented**, M1 through M6: the law harness, `nullText` escaping in the core, `from.timestamp`, the OpenRouter window-scoped `percent` fix, opt-in `extras`, the per-metric `floor` flag, `--raw`, and the two registers in `docs/architecture.md`. Treat the whole document as history, not as a plan; its section 10 is the implementation log and records where the plan turned out to be wrong. Current behaviour is `docs/architecture.md`.
+`docs/plans/payload-exposure-extras-raw-laws.md` is **fully implemented**, M1 through M6: the law harness, `nullText` escaping in the core, `from.timestamp`, the OpenRouter window-scoped `percent` fix, opt-in `extras`, the per-metric `floor` flag, `--raw`, and the two registers in `docs/architecture.md`. Treat the whole document as history rather than as a plan. Its section 10 is the implementation log and records where the plan turned out to be wrong. Current behaviour is `docs/architecture.md`.
 
 `checks/module` uses a Home Manager stub, so stub drift is invisible here by design.
 

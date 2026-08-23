@@ -11,7 +11,7 @@
 # depends only on nixpkgs and on `module/package.nix`.
 #
 # `curl` and `libsecret` are injected as stubs through `callPackage`, because
-# `writeShellApplication` prepends `runtimeInputs` to `PATH`; a stub merely
+# `writeShellApplication` prepends `runtimeInputs` to `PATH`, so a stub merely
 # placed on `PATH` by the builder would be shadowed by the real binary.
 {
   pkgs,
@@ -421,7 +421,7 @@ in
     fi
 
     # 4: failing fetch over a cache still within maxStaleAge. The stale body is
-    # a body, so it is written and the exit stays 0; the error is on stderr.
+    # a body, so it is written and the exit stays 0 while the error goes to stderr.
     unset AI_USAGE_TEST_FAIL
     reset_cache
     ai-usage httpok >/dev/null

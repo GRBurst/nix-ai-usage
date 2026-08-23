@@ -14,7 +14,7 @@
 #   Critical                        -> critical
 #   Warning with text == "?"        -> unknown  (text stays "?")
 #
-# `icon` left the document entirely; it is now the bar adapter's concern.
+# `icon` left the document entirely and is now the bar adapter's concern.
 #
 # The provider defaults mirrored by ./configs/claude.json and
 # ./configs/openrouter.json are pinned against `lib/` by `checks/config`, so
@@ -59,8 +59,9 @@
     }
     {
       # 2026-08-19T12:00:00Z and 2026-08-24T00:00:00Z, cross-checked with
-      # `date -u -d @N`. The fixture writes a bare `Z`; the recorded payload uses
-      # fractional seconds and `+00:00`, which `claude-resets-offset` covers.
+      # `date -u -d @N`. The fixture writes a bare `Z`, whereas the recorded
+      # payload uses fractional seconds and `+00:00`. That second form is covered
+      # by `claude-resets-offset`.
       name = "claude-resets-parse-to-epoch-seconds";
       config = "claude.json";
       provider = "claude";
@@ -201,8 +202,8 @@
     # `limit - limit_remaining`, because `limit_remaining` is already window
     # scoped server-side. The previous configuration divided all-time `usage`
     # by a windowed `limit`, which is only correct for an account whose
-    # lifetime spend happens to equal its current window spend -- which is
-    # true of every fixture minted before this change, and is why the suite
+    # lifetime spend happens to equal its current window spend. That is
+    # true of every fixture minted before this change, and it is why the suite
     # could not see the defect. `or-window.json` is the fixture that can.
     {
       # The whole milestone in one row. Old: `percent = 500/200 -> 100`,
@@ -225,7 +226,7 @@
     {
       # The real captured payload, redacted. Both the old and the new
       # derivation give 77 here, so production traffic never discriminated
-      # the fix; only a minted fixture could.
+      # the fix. Only a minted fixture could.
       name = "openrouter-window-real-shape";
       config = "openrouter.json";
       provider = "openrouter";
@@ -328,7 +329,7 @@
       text = "$18/$20";
     }
     {
-      # `usage` is never clamped by the limit; only `percent` is.
+      # `usage` is never clamped by the limit, whereas `percent` is.
       name = "openrouter-clamps-over-limit";
       config = "openrouter.json";
       provider = "openrouter";
@@ -426,8 +427,8 @@
     # `unit` owns clamping, `floor` owns truncation. Here four metrics opt out
     # and `limit` does not, so one document shows both behaviours: the provider's
     # own `155.984825867` survives while `limit` still reads `200`. The point is
-    # an adapter that needs real numbers -- a graph, a currency total -- rather
-    # than the two or three characters a bar can show.
+    # an adapter that needs real numbers, such as a graph or a currency total,
+    # rather than the two or three characters a bar can show.
     {
       name = "openrouter-precise-keeps-full-precision";
       config = "openrouter-precise.json";
@@ -445,8 +446,8 @@
       ];
     }
     # `percentage` is read straight from the percent-unit rule metric, so it
-    # carries the same precision. Bars accept a fractional percentage; the ones
-    # that do not were already rounding it.
+    # carries the same precision. Bars accept a fractional percentage, and the
+    # ones that do not were already rounding it.
     {
       name = "openrouter-precise-percentage-is-fractional";
       config = "openrouter-precise.json";
@@ -600,10 +601,11 @@ in
     # a filter that fails, or emits something unparsable, yields null.
     #
     # The duplication is the point. A shipped `from.expression` filter is only
-    # genuinely covered if a check *executes* it; hand-feeding `expressions` per
+    # genuinely covered if a check *executes* it. Hand-feeding `expressions` per
     # row would assert the row's own restated arithmetic and leave the filter
-    # that ships with no executable coverage anywhere -- `checks/config` pins it
-    # only as text, and `checks/runtime` uses its own config by design (D-19).
+    # that ships with no executable coverage anywhere, because `checks/config`
+    # pins it only as text and `checks/runtime` uses its own config by design
+    # (D-19).
     pre_evaluate() {
       _provider="$1"
       _body="$2"

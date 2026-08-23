@@ -54,7 +54,7 @@
 
   renderProvider = name: p:
     stripNull {
-      # The core reads `$provider.name`; the orchestrator also injects it, but
+      # The core reads `$provider.name`. The orchestrator also injects it, but
       # pinning it here keeps hand-written check configs and generated configs
       # structurally identical.
       inherit name;
@@ -134,8 +134,8 @@ in {
         #
         # `raw` because these are instants, not quantities: percent would clamp
         # them to 100 and dollars would prefix a currency symbol. They are also
-        # absent from `format`, `tooltipFormat` and `rules` -- available to an
-        # adapter, invisible by default.
+        # absent from `format`, `tooltipFormat` and `rules`, which makes them
+        # available to an adapter while staying invisible by default.
         fiveHourResetsAt = {
           from.timestamp.path = ["five_hour" "resets_at"];
           unit = "raw";
@@ -167,8 +167,8 @@ in {
       extras = {
         # Anthropic reports spend twice: `spend` as {amount_minor, currency,
         # exponent} and `extra_usage` as {used_credits, decimal_places}. The
-        # former is preferred -- one canonical encoding, and a currency code
-        # a consumer can display.
+        # former is preferred because it is one canonical encoding with a
+        # currency code a consumer can display.
         #
         # The minor-unit conversion happens here, inside the extra, so that
         # `unit = "dollars"` stays honest. Exposing `amount_minor` directly
@@ -264,7 +264,7 @@ in {
         # pre-evaluated expression already collapses to null in
         # module/package.nix, but relying on that would be accidental
         # correctness. `dollars` rather than `raw` because float subtraction
-        # produces artefacts -- 20 - 12.05 is 7.949999999999999 -- and the
+        # produces artefacts, so that 20 - 12.05 is 7.949999999999999, and the
         # unit's clamp-and-floor is what hides them.
         windowUsage = {
           from.expression = ''
@@ -279,7 +279,7 @@ in {
         };
         # Dividing all-time `usage` by a windowed `limit` reported a
         # long-lived account as permanently over budget. `usage` is retained
-        # above as informational lifetime spend; only the ratio moved.
+        # above as informational lifetime spend, and only the ratio moved.
         #
         # A3 holds: both operands are pass-1 metrics, `windowUsage` by
         # expression and `limit` by path, so this is not a percentOf of a

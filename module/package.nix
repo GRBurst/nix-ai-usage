@@ -239,12 +239,12 @@ writeShellApplication {
 
     # Raw mode reuses the resolution above verbatim, so it shares one cache,
     # lock and staleness policy with document mode rather than reimplementing a
-    # fetch; that is why `--refresh`, throttling and stale serving come for free.
+    # fetch. That is why `--refresh`, throttling and stale serving come for free.
     # It sits before expression pre-evaluation because raw mode needs none of it.
     #
     # The body has round-tripped through `$(...)`, which strips trailing
     # newlines, so this is byte-exact modulo trailing whitespace. A stale body is
-    # still a body: it is printed with exit 0, and the error is already on
+    # still a body, so it is printed with exit 0 while the error is already on
     # stderr. `stale` and `age` are document-mode concepts.
     if [ "$rawMode" = 1 ]; then
       if [ -n "$body" ]; then

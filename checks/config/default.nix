@@ -10,7 +10,7 @@
 #
 # `expected.json` is the single place where the shipped provider defaults
 # (endpoints, headers, credential locations, thresholds, templates) are pinned.
-# Downstream consumers must not re-pin them; they may only assert on
+# Downstream consumers must not re-pin them. They may only assert on
 # composition (see `docs/architecture.md` § test layers).
 #
 # This check is pure: it evaluates only `lib/` and never reads a host
@@ -49,8 +49,8 @@
 
   # Every shipped extra is opt-in, so the golden above is byte-identical to what
   # it was before extras existed. That absence is the strongest statement the
-  # golden can make, but it cannot show the groups are wired up at all -- so
-  # pin the other end of the lattice too (D-24).
+  # golden can make, but it cannot show the groups are wired up at all, so the
+  # other end of the lattice is pinned too (D-24).
   defaults = aiLib.providerDefaults {homeDirectory = "/home/testuser";};
 
   allEnabled = aiLib.mkConfig {

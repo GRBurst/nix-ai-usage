@@ -73,7 +73,7 @@ def shape($r):
   ;
 
 # `unit` defines the domain of the normalised value, so every reported metric
-# must already sit inside it -- which is also idempotence stated pointwise.
+# must already sit inside it, which is also idempotence stated pointwise.
 #
 # Clamping and truncation are separate concerns and so are their laws.
 # `norm-domain` covers the clamp, which `unit` owns unconditionally.
@@ -115,9 +115,10 @@ def normalisation($r):
            {percentage: $r.doc.percentage, candidates: $p}))
   ;
 
-# `from.timestamp` resolves to whole epoch seconds or null, for any input at all
-# -- string, number, container, or absent. jq has no type system, so this law is
-# the only statement that the parse is total. `unit` is irrelevant here: an epoch
+# `from.timestamp` resolves to whole epoch seconds or null, for any input at
+# all, whether that input is a string, a number, a container, or absent. jq has
+# no type system, so this law is the only statement that the parse is total.
+# `unit` is irrelevant here, because an epoch
 # is `raw` precisely because percent and dollar clamping would destroy it.
 def timestamps($r):
   $r.instance.provider.metrics

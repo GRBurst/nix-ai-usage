@@ -1,13 +1,15 @@
 # Law-based check over the pure core: universally quantified properties, tested
 # by bounded-exhaustive generation rather than by named examples.
 #
-# Three stages -- generate (Nix), execute (one core invocation per instance),
-# verify (pure jq over the whole result set). The core is driven through its real
-# argument interface, so no jq module split is needed to make a def observable:
-# the artefact under test is exactly the artefact that ships.
+# There are three stages. Nix generates the instances, each instance is executed
+# by one core invocation, and pure jq verifies the whole result set. The core is
+# driven through its real argument interface, so no jq module split is needed to
+# make a def observable: the artefact under test is exactly the artefact that
+# ships.
 #
 # This layer supplements checks/core, it does not replace it. Examples pin intent
-# at named points and are readable; laws pin structure everywhere and are not.
+# at named points and are readable, whereas laws pin structure everywhere and are
+# not.
 #
 # Ceiling, stated honestly: exhaustive laws over a small adversarial domain are
 # bounded verification, not proof. jq is not verifiable.
@@ -91,7 +93,7 @@
         // (i.expect or {});
     };
 
-  # A pair shares a `pairId`; the verifier groups on it and orders by
+  # A pair shares a `pairId`, and the verifier groups on it and orders by
   # `pairIndex`. This is the mechanism that makes two-invocation laws expressible
   # without splitting the core.
   mkPair = {
@@ -178,7 +180,7 @@
 
   # ------------------------------------------------------------ unary families
 
-  # Family A -- a numeric body across every unit, value and threshold. Carries
+  # Family A is a numeric body across every unit, value and threshold. It carries
   # normalisation, severity, percentage and rendering.
   familyA = lib.imap0 (i: c:
     mkInstance {
@@ -191,14 +193,14 @@
     threshold = thresholds;
   });
 
-  # Family A'' -- `floor = false`, over the same domain. `norm-integral` is
+  # Family A'' sets `floor = false` over the same domain. `norm-integral` is
   # deliberately silent here, so the teeth are in `expect.metrics`: every value
   # is pinned to the clamp with no truncation applied. Without a pinned
   # expectation this family would pass against a core that ignored the flag,
   # which is precisely the bug the first implementation had.
   #
   # `raw` is exempt from both clamping and truncation, so its expectation is the
-  # input itself -- which also states that the flag cannot start truncating a
+  # input itself, which also states that the flag cannot start truncating a
   # unit that never truncated.
   clampOnly = unit: v:
     if unit == "percent"
@@ -234,7 +236,7 @@
     value = numVals;
   });
 
-  # Family A' -- the same shape served from a stale cache, which is the only way
+  # Family A' is the same shape served from a stale cache, which is the only way
   # a healthy document carries a non-null error.
   familyStale = lib.imap0 (i: c:
     mkInstance {
@@ -250,7 +252,7 @@
     value = [0 80 100];
   });
 
-  # Family B -- bodies that yield no number at `.x`. `parses` distinguishes an
+  # Family B holds bodies that yield no number at `.x`. `parses` distinguishes an
   # unparsable body, which degrades regardless of `required`, from a parsable one
   # that merely lacks the value.
   badBodies = [
@@ -271,7 +273,7 @@
     }
     {
       # `fromjson` succeeds and yields null, which the core treats as no
-      # document at all -- the same degradation as a parse failure.
+      # document at all, giving the same degradation as a parse failure.
       label = "json-null";
       body = "null";
       parses = false;
@@ -282,7 +284,7 @@
       parses = true;
     }
     {
-      # `getpath` on an array with a string key raises; the core must catch it.
+      # `getpath` on an array with a string key raises, so the core must catch it.
       label = "array";
       body = "[]";
       parses = true;
@@ -328,9 +330,9 @@
     unit = units;
   });
 
-  # Family C -- an optional metric with no value, rendering `nullText` into both
+  # Family C is an optional metric with no value, rendering `nullText` into both
   # templates. Half of these carry pango markup, which is representable in the
-  # config schema: `nullText` is a free-form string and A5 constrains only the
+  # config schema, because `nullText` is a free-form string and A5 constrains only the
   # templates. The core must therefore be safe by construction rather than by
   # module-level validation, which a hand-written config would bypass anyway.
   nullTexts = ["" "∞" "?" "<b>x</b>" "a&b" "a<b>c"];
@@ -349,10 +351,10 @@
     nullText = nullTexts;
   });
 
-  # Family D -- severity at and around each threshold, with the expected verdict
-  # written out by hand. Values are integers inside [0, 100], so no unit changes
-  # them and the expectation is unit-independent -- which is itself the claim that
-  # severity reads the value, not the unit.
+  # Family D exercises severity at and around each threshold, with the expected
+  # verdict written out by hand. Values are integers inside [0, 100], so no unit
+  # changes them and the expectation is unit-independent. That independence is
+  # itself the claim that severity reads the value and not the unit.
   boundaryCases = [
     {
       threshold = ascending;
@@ -440,9 +442,9 @@
     unit = units;
   });
 
-  # Family E -- `percentOf`. Pins operation order: the ratio is taken over the
-  # raw pass-1 values, so 16.5/20 is 82 and not the 80 that flooring the operands
-  # first would give.
+  # Family E covers `percentOf` and pins the operation order. The ratio is taken
+  # over the raw pass-1 values, so 16.5/20 is 82 and not the 80 that flooring the
+  # operands first would give.
   ratioProvider = {
     name = "laws";
     metrics = {
@@ -562,7 +564,7 @@
     })
   ratioCases;
 
-  # Family F -- `from.expression`, whose value the orchestrator pre-computes and
+  # Family F covers `from.expression`, whose value the orchestrator pre-computes and
   # passes in. Nothing else exercises that branch of pass 1 under generation.
   familyExpression = lib.imap0 (i: c:
     mkInstance {
@@ -586,7 +588,7 @@
     value = [0 3 80 90 100 null];
   });
 
-  # Family G -- `from.timestamp` (D-20). A timestamp metric is `raw` and optional,
+  # Family G covers `from.timestamp` (D-20). A timestamp metric is `raw` and optional,
   # so it must not move `severity`, and it must never make the document degrade.
   timestampProvider = {
     name = "laws";
@@ -705,10 +707,10 @@
       })
     ];
 
-  # Family H -- D-22, the accidental-`unknown` trap, in the shape the shipped
+  # Family H covers D-22, the accidental-`unknown` trap, in the shape the shipped
   # Claude provider actually has. A reset timestamp exists to expose more of the
   # payload to an adapter. If it were `required`, an account with a window it has
-  # never used -- for which Anthropic sends `resets_at: null` -- would blank the
+  # never used, for which Anthropic sends `resets_at: null`, would blank the
   # bar instead of showing the utilisation the API did send. `unknown-iff` states
   # that in both directions, so this family generates both polarities: with
   # `required = false` nothing degrades, and flipping the same instances to
@@ -941,7 +943,7 @@
   # to ship today.
   #
   # It drives the *real* shipped providers through the *real* pure builder, so
-  # it also exercises the shipped `from.expression` filters -- which is why
+  # it also exercises the shipped `from.expression` filters, which is why
   # run-instance.sh pre-evaluates them.
   aiLib = import ../../lib {inherit lib;};
 

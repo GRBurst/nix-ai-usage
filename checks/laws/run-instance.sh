@@ -3,7 +3,7 @@
 # and record the result.
 #
 # A separate file rather than an inline heredoc so that it is readable and
-# shellcheck-able on its own, and so `xargs` can invoke it directly -- a shell
+# shellcheck-able on its own, and so `xargs` can invoke it directly. A shell
 # function cannot be exported into the `xargs` child.
 #
 # Usage: run-instance.sh <instances.json> <index> <outDir> <ai-usage.jq>
@@ -44,7 +44,7 @@ run_core() {
   # same collapse of a failing or unparsable filter to `null`. jq has no `eval`,
   # so the core receives values rather than filters (D-5), and a shipped filter is
   # only genuinely covered if a check executes it. The laws quantify over the real
-  # shipped providers, so the harness has to run the real filters; an instance's
+  # shipped providers, so the harness has to run the real filters. An instance's
   # own `expressions` is layered on top, as an override for a value the
   # orchestrator can produce but a filter cannot be made to.
   _expressions='{}'

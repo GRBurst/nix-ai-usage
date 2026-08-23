@@ -6,7 +6,7 @@
 #   --argjson expressions <{metric: value} for `from.expression` metrics>
 #   --argjson meta        <{stale, age, error}>
 #
-# Output: the v1 document. Always valid JSON; the caller always exits 0.
+# Output: the v1 document. It is always valid JSON, and the caller always exits 0.
 #
 # Extraction guard: this file must never mention a provider name, `config`,
 # `my.*`, `osConfig` or any home-manager concept. It is lifted verbatim into a
@@ -19,13 +19,14 @@ def pangoSafe: tostring | gsub("[<>&]"; "");
 def at($doc; $path):
   if $doc == null then null else (try ($doc | getpath($path)) catch null) end;
 
-# ISO-8601 UTC -> epoch seconds. Total: any input yields number|null, never
-# raises. jq's `fromdateiso8601` accepts exactly "%Y-%m-%dT%H:%M:%SZ" -- no
-# fractional seconds and no numeric offset -- so both are normalised away first.
-# A non-UTC offset is rejected rather than shifted: silently reinterpreting
-# someone else's wall clock as an instant is the kind of wrong answer that looks
-# right in a status bar. The `test` guard states the accepted shape explicitly
-# and the `try` makes totality hold even if guard and parser ever disagree.
+# ISO-8601 UTC -> epoch seconds. The function is total, so any input yields a
+# number or null and it never raises. jq's `fromdateiso8601` accepts exactly
+# "%Y-%m-%dT%H:%M:%SZ", with no fractional seconds and no numeric offset, so both
+# of those are normalised away first. A non-UTC offset is rejected rather than
+# shifted, because silently reinterpreting someone else's wall clock as an instant
+# is the kind of wrong answer that looks right in a status bar. The `test` guard
+# states the accepted shape explicitly and the `try` makes totality hold even if
+# the guard and the parser ever disagree.
 def epoch:
   if type != "string" then null
   else
@@ -39,14 +40,14 @@ def epoch:
 def unitOf($m): $m.unit // "raw";
 
 # `unit` owns clamping, `floor` owns truncation. They are separate because a bar
-# wants `77%` while an adapter summing currency wants `155.984825867`; a metric
+# wants `77%` while an adapter summing currency wants `155.984825867`, so a metric
 # can need the clamp and not the truncation. Absent `floor` means true, so a
 # config written before the flag existed keeps its behaviour exactly. `raw` is
-# exempt from both: it always passed values through untouched, and flooring it
-# now would silently truncate every existing `raw` metric.
-# The parameter is `$truncate`, not `$floor`: a parameter named `floor` shadows
-# the builtin of the same name inside the body, so `then floor` would return the
-# flag instead of truncating the value.
+# exempt from both, because it always passed values through untouched and
+# flooring it now would silently truncate every existing `raw` metric.
+# The parameter is called `$truncate` rather than `$floor` because a parameter
+# named `floor` shadows the builtin of the same name inside the body, so
+# `then floor` would return the flag instead of truncating the value.
 def norm($unit; $truncate):
   if . == null then null
   else
@@ -58,8 +59,9 @@ def norm($unit; $truncate):
 
 def entries: ($provider.metrics // {}) | to_entries;
 
-# Pass 1 -- `path`, `timestamp` and `expression` metrics, raw (un-normalised)
-# values. `timestamp` needs no `asnum`: `epoch` already returns number or null.
+# Pass 1 extracts the `path`, `timestamp` and `expression` metrics as raw,
+# un-normalised values. `timestamp` needs no `asnum`, because `epoch` already
+# returns a number or null.
 def pass1($doc):
   reduce (entries | .[]) as $e ({};
     . + {($e.key):
@@ -72,8 +74,8 @@ def pass1($doc):
        else null
        end)});
 
-# Pass 2 -- `percentOf` metrics, referencing pass-1 names only. Multiplying
-# before dividing keeps 16/20 at exactly 80.
+# Pass 2 computes the `percentOf` metrics, which may reference pass-1 names
+# only. Multiplying before dividing keeps 16/20 at exactly 80.
 def pass2($raw):
   reduce (entries | .[]) as $e ($raw;
     if ($e.value.from | has("percentOf"))
@@ -87,11 +89,12 @@ def pass2($raw):
            end)} )
     else . end);
 
-# Pass 3 -- normalisation. `unit` defines the domain and the rendering, `floor`
-# whether the value is truncated to a whole number on the way out. `floor` is
-# read with `has`, not `//`: `false // true` is `true` in jq, so the alternative
-# operator cannot default a boolean whose meaningful value is `false` -- the
-# same trap `isRequired` documents below.
+# Pass 3 normalises. `unit` defines the domain and the rendering, and `floor`
+# decides whether the value is truncated to a whole number on the way out.
+# `floor` is read with `has` rather than `//`, because `false // true` is `true`
+# in jq. The alternative operator therefore cannot default a boolean whose
+# meaningful value is `false`, which is the same trap `isRequired` documents
+# below.
 def pass3($raw):
   reduce (entries | .[]) as $e ({};
     . + {($e.key):
@@ -99,7 +102,7 @@ def pass3($raw):
        | norm(unitOf($e.value);
               if ($e.value | has("floor")) then $e.value.floor else true end))});
 
-# Derived metrics are never required; a typo'd path or expression is.
+# Derived metrics are never required, whereas a typo'd path or expression is.
 # `//` cannot be used to default `required`, because `false // true` is `true`.
 def isRequired($m):
   ($m.from | has("percentOf") | not)
@@ -123,7 +126,7 @@ def sev($v; $r):
 # rather than `$∞`.
 #
 # Every rendered value passes through `pangoSafe`, so pango safety holds by
-# construction for any config -- including a hand-written one, or one reaching
+# construction for any config, including a hand-written one and one reaching
 # this file after the standalone-flake extraction. `nullText` is free-form in the
 # schema and the module validates only the templates, so a module-level
 # assertion would not protect the core.

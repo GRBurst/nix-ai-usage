@@ -1,10 +1,10 @@
 # Bar-agnostic AI usage telemetry.
 #
-# This module owns *acquisition* and *policy*: which providers exist, where
-# their numbers come from, how credentials are resolved, and which thresholds
-# map a number onto a severity. It owns no presentation: the output is a
-# provider-agnostic JSON document (see `docs/architecture.md` § document
-# schema) which each bar adapts to its own protocol.
+# This module owns *acquisition* and *policy*, meaning which providers exist,
+# where their numbers come from, how credentials are resolved, and which
+# thresholds map a number onto a severity. It owns no presentation. The output is
+# a provider-agnostic JSON document, described under the document schema in
+# `docs/architecture.md`, which each bar adapts to its own protocol.
 #
 # The three artefacts below have deliberately different purity levels:
 #
@@ -13,7 +13,7 @@
 #   ./default.nix (this file) the only place that may read `config.*`
 #
 # That layering keeps everything except this file consumable outside Home
-# Manager; do not read `config.*` from any sibling.
+# Manager, so do not read `config.*` from any sibling.
 {
   config,
   lib,
@@ -29,8 +29,9 @@
 
   aiUsage = pkgs.callPackage ./package.nix {configFile = configJson;};
 
-  # A tagged union makes `{path = ...; expression = ...;}` unrepresentable, so
-  # "which extraction kind is this?" has exactly one answer (D-4).
+  # A tagged union makes a value carrying both `path` and `expression`
+  # unrepresentable, so the question "which extraction kind is this?" has
+  # exactly one answer (D-4).
   valueType = lib.types.attrTag {
     path = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -110,7 +111,7 @@
 
           Two consequences are worth knowing before switching it off. The
           rendered form becomes the provider's, because jq reproduces the
-          literal text of a number it has not computed on -- Anthropic sends
+          literal text of a number it has not computed on. Anthropic sends
           `"utilization": 91.0`, so `text` reads `91.0%`, and a very small
           computed value can appear in exponent form such as `1e-06`. And a
           descending rule fires later, since `floor 5.5 <= 5` holds where
@@ -139,7 +140,7 @@
   # A named, individually switchable group of additional metrics (D-24). An extra
   # may contribute metrics and nothing else: no rules, no template tokens, no
   # interval of its own. That restriction is what makes non-interference
-  # provable rather than merely likely -- with no new rules `severity` and
+  # provable rather than merely likely. With no new rules `severity` and
   # `percentage` are fixed, and with `format` untouched `text` is fixed, so
   # enabling any combination of extras can only add keys to `metrics`.
   extraType = lib.types.submodule {
@@ -355,7 +356,8 @@
   # Two different metric sets, and which assertion uses which is load-bearing.
   #
   # `effectiveMetrics` is what the document will actually contain, so the
-  # assertions about the emitted document -- A1, A3, A6 -- quantify over it.
+  # assertions about the emitted document, which are A1, A3 and A6, quantify
+  # over it.
   #
   # `declaredMetricNames` covers every extra whether enabled or not, because
   # A4, A10 and A11 are properties of the *declaration*. Checking those only
@@ -523,7 +525,7 @@ in {
         ])
       # A10: an extra must not shadow a base metric. Without this, enabling a
       # group would silently redefine a metric a rule or template depends on,
-      # and `severity` would move -- exactly what extras must not be able to do.
+      # and `severity` would move, which is exactly what extras must not do.
       ++ concatMapProviders ({
         name,
         provider,

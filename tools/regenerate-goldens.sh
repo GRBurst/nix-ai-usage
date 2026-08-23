@@ -11,8 +11,8 @@
 #
 # `AGENTS.md` requires these to be regenerated deliberately rather than
 # hand-edited, so run this, then read `git diff` as the review artefact. If the
-# diff contains anything you did not intend to change, the change is wrong --
-# do not adjust the golden to match the code.
+# diff contains anything you did not intend to change, the change is wrong.
+# Do not adjust the golden to match the code.
 #
 # `homeDirectory` is the only host-derived input to `mkConfig`, and the goldens
 # pin a neutral `/home/testuser` so the files are reproducible off any machine.
@@ -45,5 +45,5 @@ for provider in claude openrouter; do
     jq -r -f "$fmt" >"$repo/checks/core/configs/$provider.json"
 done
 
-printf 'regenerated 3 goldens; review with: git diff -- %s\n' \
+printf 'regenerated 3 goldens. review with: git diff -- %s\n' \
   'checks/config/expected.json checks/core/configs'

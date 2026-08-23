@@ -1,14 +1,17 @@
 # ai-usage
 
-A declarative AI provider usage/quota query layer: a Home Manager module plus a
-CLI that emits a **bar-agnostic JSON document**.
+A declarative query layer for AI provider usage and quota. It consists of a Home
+Manager module and a CLI that emits a **bar-agnostic JSON document**.
 
-Bars do not talk to providers. `ai-usage <provider>` fetches, caches, applies
-threshold rules and prints one JSON object; your status bar translates that
-document into its own wire format through a small adapter you own.
+Bars do not talk to providers. `ai-usage <provider>` fetches the numbers, caches
+them, applies threshold rules and prints one JSON object. Your status bar then
+translates that document into its own wire format through a small adapter that
+you own.
 
-Ships with `claude` (Anthropic utilisation) and `openrouter` (credit balance).
-Adding a provider is data, not code.
+The flake ships with two providers. `claude` reports Anthropic utilisation and
+`openrouter` reports the credit balance. Adding a provider is data, not code.
+
+The following run asks for the OpenRouter balance and pretty-prints the result:
 
 ```console
 $ ai-usage openrouter | jq .
@@ -25,13 +28,21 @@ $ ai-usage openrouter | jq .
 }
 ```
 
+The account has spent 7.42 of 25 dollars, which is under every threshold, so the
+severity is `ok`. The reading is fresh rather than served from cache, so `stale`
+is false and `error` is null.
+
 ## Install
+
+Add the flake as an input:
 
 ```nix
 # flake.nix
 inputs.ai-usage.url = "github:<owner>/ai-usage";
 inputs.ai-usage.inputs.nixpkgs.follows = "nixpkgs";
 ```
+
+Then import the module and enable it:
 
 ```nix
 # home-manager
@@ -41,13 +52,15 @@ inputs.ai-usage.inputs.nixpkgs.follows = "nixpkgs";
 }
 ```
 
-`inputs.nixpkgs.follows` is optional and does **not** affect the binary you get:
-the module builds the package with `pkgs.callPackage`, i.e. from *your* nixpkgs.
-This flake's own nixpkgs serves only its checks and formatter. Following is still
-worth doing to keep your lockfile small.
+The second line of the flake input is optional and does **not** affect the binary
+you get. The module builds the package with `pkgs.callPackage`, which means the
+build uses *your* nixpkgs. This flake's own nixpkgs serves only its checks and its
+formatter. Following is still worth doing, because it keeps your lockfile small.
 
-Credentials are not managed here. `claude` reads a logged-in Claude Code session
-from `~/.claude/.credentials.json`; `openrouter` reads the keyring:
+Credentials are not managed here. The `claude` provider reads a logged-in Claude
+Code session from `~/.claude/.credentials.json`, so no extra setup is needed once
+you have signed in. The `openrouter` provider reads the keyring instead, so store
+the key once:
 
 ```sh
 secret-tool store --label='OpenRouter' service openrouter_usage account status_bar
@@ -55,8 +68,9 @@ secret-tool store --label='OpenRouter' service openrouter_usage account status_b
 
 ## Configure
 
-Providers are an attribute set, and the built-ins are ordinary members of it —
-override a field, disable one, or add your own:
+Providers are an attribute set, and the built-ins are ordinary members of it. You
+can override a single field, disable a provider, or add one of your own. The
+example below does all three:
 
 ```nix
 programs.aiUsage = {
@@ -70,7 +84,7 @@ programs.aiUsage = {
 
   providers.openrouter.enable = false;
 
-  # a provider with no usage endpoint: produce the body locally
+  # a provider with no usage endpoint, so the body is produced locally
   providers.local = {
     source.command = "cat ~/.local/state/spend.json";
     metrics = {
@@ -84,56 +98,63 @@ programs.aiUsage = {
 };
 ```
 
-A provider declares where its numbers come from (`source.http` or
-`source.command`), how to authenticate (`credential.file`, `credential.secretTool`
-or `credential.command`), which `metrics` to extract, which `rules` map a number
-onto a severity, and how to `format` the result. Metric names double as template
-tokens. Misconfiguration is caught at evaluation time by eleven assertions, not at
-runtime in your bar.
+Reading the `local` provider from the top: it runs a shell command instead of an
+HTTP request, sums the cost of every entry in the resulting JSON into `spent`,
+reads `budget` straight out of the body, derives `percent` from those two, warns
+at 80 percent, and displays the two dollar amounts side by side.
 
-A metric can also read a timestamp: `from.timestamp.path` parses an ISO-8601 UTC
-instant to epoch seconds, or to `null` when the provider sends something else.
-The shipped `claude` provider uses this for `fiveHourResetsAt` and
-`sevenDayResetsAt`, which appear in `metrics` but in no template — so a countdown
-is available to your adapter without this repository deciding how time is
+A provider declares five things. It declares where its numbers come from, either
+`source.http` or `source.command`. It declares how to authenticate, using one of
+`credential.file`, `credential.secretTool` or `credential.command`. It declares
+which `metrics` to extract, which `rules` map a number onto a severity, and how
+to `format` the result. Metric names double as template tokens, which is why
+`{spent}` above resolves to the value of the `spent` metric. Misconfiguration is
+caught at evaluation time by eleven assertions rather than at runtime in your bar.
+
+A metric can also read a timestamp. `from.timestamp.path` parses an ISO-8601 UTC
+instant into epoch seconds, and yields `null` when the provider sends anything
+else. The shipped `claude` provider uses this for `fiveHourResetsAt` and
+`sevenDayResetsAt`. Both appear in `metrics` and in no template, so a countdown is
+available to your adapter without this repository deciding how time should be
 formatted.
 
 Some payload fields are useful but not worth carrying by default, so they ship as
-`extras` — named metric groups you switch on individually:
+`extras`. These are named metric groups that you switch on individually:
 
 ```nix
 programs.aiUsage.providers.openrouter.extras.weekly.enable = true;
 programs.aiUsage.providers.claude.extras.spend.enable = true;
 ```
 
-`openrouter` ships `daily`, `weekly` and `monthly` spend windows; `claude` ships
-`spend`, which converts Anthropic's minor units into dollars. An extra can
-contribute metrics and nothing else — no rules, no template tokens — so enabling
-one adds keys to `metrics` and cannot change `text`, `tooltip`, `severity` or
-`percentage`. That is checked over every subset of every shipped provider's
-extras, not just asserted here.
+The `openrouter` provider ships the spend windows `daily`, `weekly` and
+`monthly`. The `claude` provider ships `spend`, which converts Anthropic's minor
+units into dollars. An extra can contribute metrics and nothing else. It carries
+no rules and no template tokens, so enabling one adds keys to `metrics` and cannot
+change `text`, `tooltip`, `severity` or `percentage`. That property is checked over
+every subset of every shipped provider's extras rather than merely asserted here.
 
 Numbers in `metrics` are truncated to whole units by default, because a bar has
-room for `77%` and not `77.9924129335%`. Set `floor = false` on a metric when
+room for `77%` and not for `77.9924129335%`. Set `floor = false` on a metric when
 your adapter wants the provider's own precision:
 
 ```nix
 programs.aiUsage.providers.openrouter.metrics.usage.floor = false;
 ```
 
-`metrics` then carries `155.984825867` rather than `155`. It is per metric, so a
-truncated `limit` can sit beside a full-precision `usage` in one document. Two
-consequences worth knowing: the rendered `text` becomes whatever the provider
-wrote, so a payload sending `91.0` renders `91.0%`; and a *descending* rule fires
-later, since `floor 5.5 <= 5` holds where `5.5 <= 5` does not.
+With that setting `metrics` carries `155.984825867` rather than `155`. The flag is
+per metric, so a truncated `limit` can sit beside a full-precision `usage` in one
+document. Two consequences are worth knowing. The rendered `text` becomes whatever
+the provider wrote, so a payload sending `91.0` renders as `91.0%`. A *descending*
+rule also fires later, because `floor 5.5 <= 5` holds where `5.5 <= 5` does not.
 
-`programs.aiUsage.settings` exposes the rendered config document read-only, so
-your own tests can assert on what the module produced.
+`programs.aiUsage.settings` exposes the rendered config document as a read-only
+option, so your own tests can assert on what the module produced.
 
 ## Wiring a bar
 
 `ai-usage <provider>` is the whole interface. Pipe it through a `jq` adapter that
-emits your bar's format — for i3status-rust, `{icon, state, text}`:
+emits your bar's format. i3status-rust wants the three fields `icon`, `state` and
+`text`, which the following wrapper produces:
 
 ```nix
 pkgs.writeShellApplication {
@@ -152,43 +173,51 @@ pkgs.writeShellApplication {
 }
 ```
 
+The wrapper takes the provider as its first argument and an icon name as its
+optional second argument. The `jq` filter then maps the four severities onto the
+three states that i3status-rust knows, which is the only real translation work an
+adapter has to do.
+
 The document already carries `tooltip`, `percentage` and `stale`, which is more
-than most bars need; only the wire format differs.
+than most bars need. Only the wire format differs between bars.
 
 ## Output
 
-In document mode, always exit `0`, always one valid JSON object on stdout — a
-failed read is a document with `severity = "unknown"`, `text = "?"` and a
-non-null `error`, never a crash that breaks your bar. Severities are
-`ok < warn < critical < unknown`.
+In document mode the CLI always exits `0` and always writes exactly one valid
+JSON object to stdout. A failed read is a document with `severity = "unknown"`,
+`text = "?"` and a non-null `error`, never a crash that breaks your bar. The
+severities are ordered `ok < warn < critical < unknown`.
 
 Successful bodies are cached under `$XDG_CACHE_HOME/ai-usage/<provider>.json`
-with a `flock`, so several bar blocks polling at once make one request. A
-provider is refetched no more often than `refreshInterval` (300 s), retried no
-more often than `retryInterval` (60 s) after a failure, and the last good reading
-is served marked `"stale": true` for up to `maxStaleAge` (900 s) before degrading
-to `?`.
+behind a `flock`, so several bar blocks polling at once make a single request. A
+provider is refetched no more often than `refreshInterval`, which defaults to 300
+seconds. After a failure it is retried no more often than `retryInterval`, which
+defaults to 60 seconds. In the meantime the last good reading is served with
+`"stale": true` for up to `maxStaleAge`, which defaults to 900 seconds, and only
+then does the document degrade to `?`.
 
-Exit codes are `0` normally, `1` for a config error and `2` for a usage error.
-Use `--refresh` to force a fetch, and `--config <path>` (or `$AI_USAGE_CONFIG`)
-to run against a scratch config without a rebuild.
+The exit codes are `0` for a normal run, `1` for a config error and `2` for a
+usage error. Pass `--refresh` to force a fetch, and `--config <path>` (or the
+environment variable `$AI_USAGE_CONFIG`) to run against a scratch config without
+a rebuild.
 
 ### `--raw`
 
 `ai-usage <provider> --raw` prints the upstream response body instead of the
-document, which is how you mint a fixture without reconstructing the request and
+document. This is how you mint a fixture without reconstructing the request and
 its credential by hand:
 
 ```sh
 ai-usage claude --raw > checks/core/fixtures/my-capture.json
 ```
 
-It reuses the same cache, lock and staleness policy, so `--refresh` and
-throttling behave identically. It is an ordinary Unix filter rather than the
-status-bar protocol, and therefore **exits `0` if and only if it wrote a body** —
-never an empty file reported as success. A stale body still counts as a body: it
-is printed with exit `0` and the fetch error goes to stderr. Output is byte-exact
-apart from trailing whitespace, which is normalised to a single newline.
+It reuses the same cache, the same lock and the same staleness policy, so
+`--refresh` and throttling behave exactly as they do in document mode. It is an
+ordinary Unix filter rather than the status-bar protocol, and therefore **exits
+`0` if and only if it wrote a body**. An empty file is never reported as success.
+A stale body still counts as a body, so it is printed with exit `0` while the
+fetch error goes to stderr. Output is byte-exact apart from trailing whitespace,
+which is normalised to a single newline.
 
 ## Development
 
@@ -197,12 +226,12 @@ nix flake check --keep-going   # core, laws, config, runtime, module
 nix fmt
 ```
 
-Five test layers, each owning exactly one thing: `core` (pure jq semantics at
-named points, over JSON fixtures), `laws` (the same core, but universally
-quantified properties over a generated adversarial domain), `config` (golden file
-pinning the shipped provider defaults), `runtime` (the orchestrator against stub
-`curl`/`secret-tool`), and `module` (the Home Manager options, plus a violating
-configuration for every assertion).
+There are five test layers, and each owns exactly one thing. `core` covers pure
+jq semantics at named points, driven by JSON fixtures. `laws` covers the same core
+through universally quantified properties over a generated adversarial domain.
+`config` is a golden file pinning the shipped provider defaults. `runtime` covers
+the orchestrator against stub `curl` and `secret-tool`. `module` covers the Home
+Manager options, together with a violating configuration for every assertion.
 
 See [`docs/architecture.md`](docs/architecture.md) for the config, document and
 cache schemas, the three-pass resolution semantics, the provider reference, and
